@@ -1,0 +1,6 @@
+{
+  "name": "Kỳ Đài Giang Hồ 3D",
+  "description": "Ứng dụng cờ tướng 3D tương tác trực tiếp trên TikTok Live với nhân vật ảo kiếm hiệp, bot đọc khung chat và bình luận viên thế cờ chuyên sâu.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
