@@ -26,4 +26,13 @@ jobs:
         run: npm run lint
 
       - name: Unit tests
-        run: npm test
+        run: |
+          set +e
+          npm test > /tmp/test.log 2>&1
+          code=$?
+          cat /tmp/test.log
+          if [ "$code" -ne 0 ]; then
+            start=$(grep -n -m1 -E 'not ok [0-9]' /tmp/test.log | cut -d: -f1)
+            tail -n "+${start:-1}" /tmp/test.log | head -25 | cut -c1-180 | tr -d '%|' | sed 's/^/::error::test: /'
+          fi
+          exit "$code"
