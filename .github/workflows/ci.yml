@@ -32,6 +32,7 @@ jobs:
           code=$?
           cat /tmp/test.log
           if [ "$code" -ne 0 ]; then
-            { grep -E '^# (tests|pass|fail)' /tmp/test.log; awk '/✖|not ok|AssertionError/{f=18} f>0{print; f--}' /tmp/test.log | tail -n 16; } | cut -c1-180 | tr -d '%|' | sed 's/^/::error::test: /'
+            grep -E '✖|not ok' /tmp/test.log | cut -c1-160 | sed 's/^/::error::fail: /'
+            grep -E '^# (tests|pass|fail)' /tmp/test.log | sed 's/^/::error::sum: /'
           fi
           exit "$code"

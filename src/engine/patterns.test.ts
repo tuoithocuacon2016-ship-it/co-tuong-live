@@ -169,7 +169,7 @@ test('Bát Hoàng Mã: vacating the horse leg unbrings a hidden check', () => {
       { r: 3, c: 0, side: 'red', type: 'soldier' },
     ],
     { row: 8, col: 5 },
-    { row: 2, col: 5 },
+    { row: 8, col: 0 },
     'bat_hoang_ma',
   );
 });
