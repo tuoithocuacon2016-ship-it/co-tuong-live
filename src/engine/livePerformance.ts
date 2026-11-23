@@ -154,7 +154,7 @@ export function resolvePronounProfile(
     audience: 'hai họ',
     storyMode: 'bridal_duel',
     storyBrief:
-      'Tân Nương Áo Đỏ Kỳ Ma Điêu Nguyệt đang ngồi trong chòi cổ giữa hồ sen dưới ánh trăng, đánh một ván cờ thử tài chú rể trước giờ động phòng hoa chúc (chàng thắng thì thiếp nghe lời răm rắp, chàng thua thì ôm gối ra hành lang ngắm trăng)',
+      'Tân Nương Áo Đỏ Kỳ Ma Điêu Nguyệt đang ngồi trong chòi cổ giữa hồ sen dưới ánh trăng, đánh một ván cờ thử tài chú rể trước giờ động phòng hoa chúc (chàng thắng thì thiếp giao lại một lớp hồi môn, chàng thua thì ôm gối ra hành lang ngắm trăng)',
   };
 }
 
@@ -272,7 +272,7 @@ export function buildMovePerformanceScript(params: {
     ? 'ôm gối ra hành lang ngắm trăng'
     : 'nhận phạt uống liền ba chén trà sen';
   const stakeReward = isBridal
-    ? 'nghe lời chàng răm rắp đêm hoa chúc'
+    ? 'tâm phục khẩu phục, nhường chàng một lớp hồi môn'
     : `tâm phục khẩu phục, kính ${p.guest} một chén trà thơm`;
 
   const seed =
@@ -686,7 +686,7 @@ export function buildLiveSessionBeat(params: {
       pool = isBridal
         ? [
             {
-              line: `Chào ${p.audience} phòng live! Trước giờ động phòng hoa chúc... ${p.guest} đánh với ${p.self} một ván nhé — thắng thì ${p.self} nghe lời răm rắp, còn thua thì ra hành lang ngắm trăng nha!`,
+              line: `Chào ${p.audience} phòng live! Trước giờ động phòng hoa chúc... ${p.guest} đánh với ${p.self} một ván nhé — thắng thì ${p.self} giao lại một lớp hồi môn, còn thua thì ra hành lang ngắm trăng nha!`,
               emotion: 'amused',
               gesture: 'closeup_talk',
               stageDirection: 'Mỉm cười rạng rỡ chào hai họ dưới ánh nến hỷ',

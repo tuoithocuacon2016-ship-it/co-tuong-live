@@ -103,7 +103,7 @@ export const TitleOverlay: React.FC<TitleOverlayProps> = ({
 
           <p className="text-sm sm:text-base text-[#d2c5b0] leading-relaxed max-w-md mb-8">
             Đêm tân hôn nến đỏ lung linh, Tân Nương Áo Đỏ Điêu Nguyệt bày sẵn bàn cờ thử tài chàng
-            trước giờ động phòng: thắng thiếp thì thiếp nghe lời răm rắp, thua thì ôm gối ngắm trăng!
+            trước giờ động phòng: thắng thiếp thì thiếp giao lại một lớp hồi môn, thua thì ôm gối ngắm trăng!
             Chat thẳng lệnh cờ như{' '}
             <span className="font-mono-num text-[#f2cb7e]">p2 bình 5</span>,{' '}
             <span className="font-mono-num text-[#f2cb7e]">x7 bình 3</span>,{' '}

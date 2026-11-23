@@ -36,7 +36,7 @@ export const StatusModal: React.FC<StatusModalProps> = ({
   const subtitle = isPaused
     ? 'Phiên phát sóng đang tạm nghỉ. Khôi phục ngay để tiếp tục ván cờ đêm hoa chúc.'
     : status === 'red_win'
-      ? 'Tuyệt kỹ xuất thần! Chàng thắng trọn ván cờ hoa chúc — thiếp tâm phục khẩu phục nghe lời chàng đêm nay!'
+      ? 'Tuyệt kỹ xuất thần! Chàng thắng trọn ván cờ hoa chúc — hai họ làm chứng, thiếp giao lại một lớp hồi môn đúng như đã hẹn!'
       : status === 'black_win'
         ? 'Hì hì, hai họ làm chứng nhé! Tân Nương Áo Đỏ giữ vững kỳ đài, đêm nay chàng tự giác ôm gối ra hành lang ngắm trăng nha!'
         : 'Nội lực tương đồng, phu thê hòa khí thu cờ dưới ánh nến hồng.';

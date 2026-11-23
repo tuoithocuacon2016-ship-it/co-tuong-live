@@ -32,6 +32,7 @@ import {
   unmakeNullMoveFast,
 } from './xiangqiFast';
 import { colToFile, formatMoveVietnamese } from './notation';
+import { KillPatternHit, detectKillPattern } from './patterns';
 
 export type BotDifficulty = 'nhap_mon' | 'cao_thu' | 'tong_su';
 
@@ -64,6 +65,8 @@ export interface DeepAnalysisResult {
   variations: TacticalVariation[];
   threats: TacticalThreat[];
   motif: string;
+  /** Named 杀法 detected on the move, when the geometry really matches a classic kill pattern. */
+  killPattern?: KillPatternHit;
   tacticalSummary: string;
   /** Depth actually completed by Iterative Deepening (for diagnostics / tests) */
   searchDepth?: number;
@@ -727,11 +730,16 @@ export function detectMoveMotif(
     return 'Pháo Đầu Trấn Trung';
   }
   if (move.piece.type === 'horse') {
-    const enemyPalaceCorner =
+    const enemyFishingPost =
       move.piece.side === 'red'
         ? move.to.row === 2 && (move.to.col === 2 || move.to.col === 6)
         : move.to.row === 7 && (move.to.col === 2 || move.to.col === 6);
-    if (enemyPalaceCorner) return 'Ngọa Tào Mã Áp Cung';
+    if (enemyFishingPost) return 'Điếu Ngư Mã Áp Cung';
+    const enemyThroatPost =
+      move.piece.side === 'red'
+        ? move.to.row === 1 && (move.to.col === 2 || move.to.col === 6)
+        : move.to.row === 8 && (move.to.col === 2 || move.to.col === 6);
+    if (enemyThroatPost) return 'Ngọa Tào Mã Áp Cung';
     if (toFile === 3 || toFile === 7) return 'Bình Phong Khởi Mã';
     return 'Phi Mã Xuất Trận';
   }
@@ -1089,7 +1097,8 @@ export function analyzePosition(
   const bestRedScore = toRedScore(best.scoreSide);
   const afterBest = applyMoveOnGrid(state.grid, best.boardMove);
   const bestNotation = formatMoveVietnamese(state.grid, best.boardMove);
-  const motif = detectMoveMotif(state.grid, best.boardMove, afterBest);
+  const killPattern = detectKillPattern(state.grid, afterBest, best.boardMove);
+  const motif = killPattern ? killPattern.nameVi : detectMoveMotif(state.grid, best.boardMove, afterBest);
   const threats = findTacticalThreats(state.grid);
   const winProbRed = scoreToWinProbRed(bestRedScore);
 
@@ -1112,6 +1121,7 @@ export function analyzePosition(
     variations,
     threats,
     motif,
+    killPattern: killPattern ?? undefined,
     tacticalSummary: `${motif} · ${advantageText}`,
     searchDepth: completedDepth,
     positionKey,

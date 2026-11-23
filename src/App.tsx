@@ -114,7 +114,7 @@ export default function App() {
     {
       id: 'init_1',
       username: BOT_MASTER_PROFILE.name,
-      text: 'Đêm tân hôn nến đỏ khai cuộc! Chàng thắng thiếp thì thiếp nghe lời răm rắp, thua thì ôm gối ngắm trăng nha! Chat "!choi" để lên đài hoặc gửi nước đi như "p2 bình 5", "m8 tiến 7", "x7 bình 3".',
+      text: 'Đêm tân hôn nến đỏ khai cuộc! Chàng thắng thiếp thì thiếp giao lại một lớp hồi môn, thua thì ôm gối ngắm trăng nha! Chat "!choi" để lên đài hoặc gửi nước đi như "p2 bình 5", "m8 tiến 7", "x7 bình 3".',
       timestamp: Date.now() - 4000,
       kind: 'bot',
     },
@@ -133,7 +133,7 @@ export default function App() {
     actor: BOT_MASTER_PROFILE.name,
     notation: 'Khai Cuộc',
     motif: 'Hoa Chúc Khai Đài',
-    line: 'Chào hai họ phòng live! Trước giờ động phòng hoa chúc... chàng đánh với thiếp một ván nhé — thắng thì thiếp nghe lời chàng răm rắp, còn thua thì ra hành lang ngắm trăng nha!',
+    line: 'Chào hai họ phòng live! Trước giờ động phòng hoa chúc... chàng đánh với thiếp một ván nhé — thắng thì thiếp giao lại một lớp hồi môn trước bàn dân thiên hạ, còn thua thì ra hành lang ngắm trăng nha!',
     mood: 'calm',
     emotion: 'amused',
     emotionLabel: EMOTION_LABELS_VI.amused,
@@ -301,7 +301,7 @@ export default function App() {
   );
 
   const recordRecentLine = useCallback((line: string) => {
-    recentLinesRef.current = [...recentLinesRef.current.slice(-9), line];
+    recentLinesRef.current = [...recentLinesRef.current.slice(-14), line];
   }, []);
 
   const dispatchGestureCue = useCallback(
@@ -1435,7 +1435,7 @@ export default function App() {
           onReplayVoice={() => handleReplayOrTestVoice()}
           onTestVoice={() =>
             handleReplayOrTestVoice(
-              'Đêm hoa chúc... ánh trăng in bóng hồ sen đẹp quá! Chàng thắng ván này thì thiếp nghe lời — còn thua thì ra hành lang ngắm trăng nha!',
+              'Đêm hoa chúc... ánh trăng in bóng hồ sen đẹp quá! Chàng thắng ván này thì thiếp nhường một lớp hồi môn — còn thua thì ra hành lang ngắm trăng nha!',
             )
           }
           onRequestAiCommentary={() => {
@@ -1618,7 +1618,7 @@ export default function App() {
             }}
             onTestVoice={() =>
               handleReplayOrTestVoice(
-                'Đêm hoa chúc... ánh trăng in bóng hồ sen đẹp quá! Chàng thắng ván này thì thiếp nghe lời — còn thua thì ra hành lang ngắm trăng nha!',
+                'Đêm hoa chúc... ánh trăng in bóng hồ sen đẹp quá! Chàng thắng ván này thì thiếp nhường một lớp hồi môn — còn thua thì ra hành lang ngắm trăng nha!',
               )
             }
             onResetMatch={handleResetMatch}
