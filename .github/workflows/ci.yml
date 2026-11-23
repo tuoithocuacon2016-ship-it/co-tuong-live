@@ -26,13 +26,5 @@ jobs:
         run: npm run lint
 
       - name: Unit tests
-        run: |
-          set +e
-          npm test > /tmp/test.log 2>&1
-          code=$?
-          cat /tmp/test.log
-          if [ "$code" -ne 0 ]; then
-            grep -E '✖|not ok' /tmp/test.log | cut -c1-160 | sed 's/^/::error::fail: /'
-            grep -E '^# (tests|pass|fail)' /tmp/test.log | sed 's/^/::error::sum: /'
-          fi
+        run: npm test
           exit "$code"
