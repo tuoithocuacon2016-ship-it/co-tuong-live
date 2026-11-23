@@ -15,8 +15,12 @@ jobs:
         with:
           node-version: '24'
 
+      - uses: oven-sh/setup-bun@v2
+
+      # bun.lock is the only lockfile in the repo, so npm ci/npm install resolve a
+      # different tree than the one this project was built against.
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: bun install --frozen-lockfile
 
       - name: Typecheck
         run: npm run lint
