@@ -258,6 +258,23 @@ test('The opening never fabricates a forcing kill pattern', () => {
   }
 });
 
+test('Bạch Kiểm Tướng needs the facing rule to be the decisive denial', () => {
+  const state = buildBoard(
+    [
+      { r: 0, c: 4, side: 'black', type: 'king' },
+      { r: 9, c: 3, side: 'red', type: 'king' },
+      { r: 5, c: 7, side: 'red', type: 'chariot' },
+      { r: 2, c: 4, side: 'red', type: 'soldier' },
+    ],
+    'red',
+  );
+  const { hit } = play(state, { row: 5, col: 7 }, { row: 0, col: 7 });
+  assert.ok(hit, 'chariot check whose only unguarded flight is the faced file');
+  assert.equal(hit!.id, 'bach_kiem_tuong', `expected bach_kiem_tuong, got ${hit!.id}`);
+  assert.equal(hit!.nameZh, '白脸将');
+  assert.ok(hit!.forcing);
+});
+
 test('Pattern names are always Vietnamese-script, never raw Chinese glyphs', () => {
   const ids: KillPatternId[] = ['ngo_tao_ma', 'phao_nan_dan_sa', 'dai_dao_hoach_tam'];
   const state = buildBoard(

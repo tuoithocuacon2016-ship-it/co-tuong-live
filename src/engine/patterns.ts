@@ -252,15 +252,19 @@ function detectBeCung(grid: Grid, f: Frame, king: Coord, checkers: Coord[]): boo
 function detectBachKiemTuong(grid: Grid, f: Frame, king: Coord): boolean {
   const attackerKing = findKing(grid, f.attacker);
   if (!attackerKing) return false;
-  const steps = palaceSteps(king);
-  for (const step of steps) {
-    if (grid[step.row][step.col]) continue;
-    if (step.col !== attackerKing.col) continue;
-    if (isSquareAttackedBy(grid, step.row, step.col, f.attacker)) continue;
-    const gap = betweenCount(attackerKing, step, grid);
-    if (gap === 0) return true;
+  let gazeDenied = false;
+  for (const step of palaceSteps(king)) {
+    const occupied = grid[step.row][step.col] !== null;
+    const attacked = isSquareAttackedBy(grid, step.row, step.col, f.attacker);
+    if (occupied || attacked) continue;
+    // Reachable by force, so the king could only be kept off this square by the
+    // no-facing rule - and only if every other flight is covered, that rule is
+    // what actually kills. Otherwise it is just a background shape.
+    const gazed = step.col === attackerKing.col && betweenCount(attackerKing, step, grid) === 0;
+    if (gazed) gazeDenied = true;
+    else return false;
   }
-  return false;
+  return gazeDenied;
 }
 
 function detectBatHoangMa(prevGrid: Grid, grid: Grid, move: Move, f: Frame, king: Coord): boolean {
