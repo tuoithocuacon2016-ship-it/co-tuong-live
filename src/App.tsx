@@ -51,10 +51,12 @@ import {
   PerformanceGesture,
   PerformanceScript,
   buildLiveSessionBeat,
+  buildRepetitionWarningScript,
   classifyTacticalEvent,
   countBoardPieces,
   detectMatchPhase,
 } from './engine/livePerformance';
+import { refereeForBoard } from './engine/repetitionReferee';
 import {
   CrowdVoteState,
   LiveControlMode,
@@ -264,6 +266,8 @@ export default function App() {
   const gestureChoreoTimerRef = useRef<number | null>(null);
   const lastViewerReplyAtRef = useRef<number>(0);
   const lastIllegalSpokenAtRef = useRef<number>(0);
+  const lastRepetitionSpokenAtRef = useRef<number>(0);
+  const lastRepetitionWarnPlyRef = useRef<number>(-999);
   const voiceConfirmTimerRef = useRef<number | null>(null);
 
   // Refs synced to latest state so Three.js callbacks & SSE listeners never go stale
@@ -670,7 +674,44 @@ export default function App() {
 
       const playedMotif = detectMoveMotif(currentBoard.grid, move, nextBoard.grid);
 
-      // Case 1: Match Ended (Checkmate / Stalemate) — deliver emotional finale immediately
+      // Case 0: Repetition referee. The warning is a once-per-cycle chat line ALWAYS (viewers need
+      // the rule spelled out), while the spoken nudge waits for the bride to finish talking.
+      const referee = refereeForBoard(nextBoard);
+      if (referee.warning === 'perpetual_check_warning' && referee.offender) {
+        const offender = referee.offender;
+        if (nextBoard.moveCount - lastRepetitionWarnPlyRef.current >= 4) {
+          lastRepetitionWarnPlyRef.current = nextBoard.moveCount;
+          appendMessage({
+            username: 'Trong Tài Kỳ Đài',
+            text:
+              `Thế cờ đã lặp lại vòng thứ hai với nước chiếu liên tiếp của ` +
+              `${offender === 'red' ? activeChallengerRef.current.username : BOT_MASTER_PROFILE.name}. ` +
+              `Đủ 3 vòng là phạm luật Trường Chiếu — bên chiếu bị xử thua, nên đổi nước khác.`,
+            kind: 'system',
+          });
+          const now = Date.now();
+          if (
+            now - lastRepetitionSpokenAtRef.current > 6000 &&
+            speakingEngineRef.current === null
+          ) {
+            lastRepetitionSpokenAtRef.current = now;
+            const guest = activeChallengerRef.current;
+            performScriptBeat(
+              buildRepetitionWarningScript({
+                offender,
+                challengerName: guest.username,
+                guestGender: guest.gender,
+                guestAge: guest.age,
+                moveCount: nextBoard.moveCount,
+                recentLines: recentLinesRef.current,
+              }),
+              { notation: 'Nhắc Luật Trường Chiếu' },
+            );
+          }
+        }
+      }
+
+      // Case 1: Match Ended (checkmate, stalemate, or a referee ruling) — finale immediately
       if (nextBoard.status !== 'playing') {
         const terminalAnalysis =
           precomputed?.nextAnalysis ??
@@ -920,6 +961,7 @@ export default function App() {
     [
       appendMessage,
       dispatchGestureCue,
+      performScriptBeat,
       recordRecentLine,
       requestEmotionalGeminiCommentary,
       showAnalysis,
@@ -1235,7 +1277,11 @@ export default function App() {
         // 4B. Special Live Challenger Commands (!xinthua, !hoaco, !dilai, !goiy)
         if (intent.type === 'resign' && appStateRef.current === 'playing') {
           appendMessage({ username, text, kind: 'challenger' });
-          const nextBoard: BoardState = { ...liveBoard, status: 'black_win' };
+          const nextBoard: BoardState = {
+            ...liveBoard,
+            status: 'black_win',
+            statusReason: 'resign',
+          };
           setBoard(nextBoard);
           boardRef.current = nextBoard;
           const script = buildLiveInteractionScript({
@@ -1263,7 +1309,11 @@ export default function App() {
           });
           performScriptBeat(script, { notation: 'Cầu Hòa' });
           if (redScore > -130) {
-            const drawBoard: BoardState = { ...liveBoard, status: 'draw' };
+            const drawBoard: BoardState = {
+              ...liveBoard,
+              status: 'draw',
+              statusReason: 'draw_agreement',
+            };
             setBoard(drawBoard);
             boardRef.current = drawBoard;
             setAppState('gameover');
@@ -1993,6 +2043,7 @@ export default function App() {
     nudgedTurnKeyRef.current = '';
     countdownTurnKeyRef.current = '';
     recentLinesRef.current = [];
+    lastRepetitionWarnPlyRef.current = -999;
     recentPosKeysRef.current = freshAnalysis.positionKey ? [freshAnalysis.positionKey] : [];
     setBoard(fresh);
     boardRef.current = fresh;
@@ -2594,6 +2645,7 @@ export default function App() {
         <StatusModal
           mode={appState}
           status={board.status}
+          statusReason={board.statusReason}
           moveCount={board.moveCount}
           winProbRed={analysis.winProbRed}
           challenger={activeChallenger}

@@ -1,3 +1,6 @@
+import type { PositionRecord, StatusReason } from './repetitionReferee';
+import { ledgerForBoard, recordForPosition, refereeVerdict } from './repetitionReferee';
+
 export type Side = 'red' | 'black';
 
 export type PieceType =
@@ -34,6 +37,10 @@ export interface BoardState {
   lastMove: Move | null;
   status: 'playing' | 'red_win' | 'black_win' | 'draw';
   inCheck: Side | null;
+  /** Why the game is over. Absent on states built before the referee existed. */
+  statusReason?: StatusReason;
+  /** Position ledger the repetition referee reads. Optional so hand-built fixtures stay valid. */
+  refereeHistory?: PositionRecord[];
 }
 
 export const BOARD_ROWS = 10;
@@ -162,6 +169,9 @@ export function createInitialBoard(): BoardState {
     lastMove: null,
     status: 'playing',
     inCheck: null,
+    refereeHistory: [
+      recordForPosition({ grid, turn: 'red', ply: 0, mover: null, gaveCheck: false, captured: false }),
+    ],
   };
 }
 
@@ -461,10 +471,28 @@ export function makeMove(state: BoardState, move: Move): BoardState {
   const nextInCheck = isInCheck(nextGrid, nextTurn) ? nextTurn : null;
   const nextLegal = generateLegalMoves(nextGrid, nextTurn);
 
+  const refereeHistory = [
+    ...ledgerForBoard(state),
+    recordForPosition({
+      grid: nextGrid,
+      turn: nextTurn,
+      ply: state.moveCount + 1,
+      mover: state.turn,
+      gaveCheck: nextInCheck !== null,
+      captured: move.captured != null,
+    }),
+  ];
+  const verdict = refereeVerdict(refereeHistory);
+
   let status: BoardState['status'] = 'playing';
+  let statusReason: StatusReason | undefined;
   if (nextLegal.length === 0) {
     // In Xiangqi, both checkmate and stalemate are a win for the side who just moved!
     status = state.turn === 'red' ? 'red_win' : 'black_win';
+    statusReason = nextInCheck ? 'checkmate' : 'stalemate';
+  } else if (verdict.status !== 'playing') {
+    status = verdict.status;
+    statusReason = verdict.reason ?? undefined;
   } else if (state.moveCount + 1 >= 180) {
     status = 'draw';
   }
@@ -476,6 +504,8 @@ export function makeMove(state: BoardState, move: Move): BoardState {
     lastMove: move,
     status,
     inCheck: nextInCheck,
+    ...(statusReason ? { statusReason } : {}),
+    refereeHistory,
   };
 }
 
