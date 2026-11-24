@@ -10,6 +10,8 @@ import {
 export interface ChallengerEntry {
   id: string;
   username: string;
+  /** Who may move for this seat - see `src/engine/liveIdentity.ts`. */
+  actorId: string;
   gender: GuestGender;
   age: number;
   character: WuxiaCharacterProfile;
@@ -61,6 +63,7 @@ export function emotionToMood(emotion: HostEmotion): CommentaryItem['mood'] {
 
 export function createChallenger(
   username: string,
+  actorId: string,
   gender: GuestGender,
   age: number,
   explicitCharacter?: WuxiaCharacterProfile,
@@ -70,6 +73,7 @@ export function createChallenger(
   return {
     id: `ch_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
     username: cleanName,
+    actorId,
     gender,
     age: safeAge,
     character: explicitCharacter ?? matchGuestCharacter(gender, safeAge),
@@ -77,17 +81,15 @@ export function createChallenger(
   };
 }
 
+// Two viewers can claim the same handle, so the queue is keyed by actor id: the
+// second one to register gets their own slot instead of overwriting the first.
 export function enqueueChallenger(
   queue: ChallengerEntry[],
   entry: ChallengerEntry,
 ): ChallengerEntry[] {
-  const exists = queue.some(
-    (q) => q.username.toLowerCase() === entry.username.toLowerCase(),
-  );
+  const exists = queue.some((q) => q.actorId === entry.actorId);
   if (exists) {
-    return queue.map((q) =>
-      q.username.toLowerCase() === entry.username.toLowerCase() ? entry : q,
-    );
+    return queue.map((q) => (q.actorId === entry.actorId ? entry : q));
   }
   return [...queue, entry];
 }

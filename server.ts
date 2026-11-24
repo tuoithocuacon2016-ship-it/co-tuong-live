@@ -1,10 +1,17 @@
 import 'dotenv/config';
-import express, { Request, Response } from 'express';
+import express, { NextFunction, Request, Response } from 'express';
 import path from 'path';
+import { createHash, timingSafeEqual } from 'crypto';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import { buildGeminiTtsSpeechPayload, normalizeSpeechEmotion } from './src/utils/speechProsody';
 import { resolvePronounProfile } from './src/engine/livePerformance';
+import {
+  displayHandle,
+  reserveActorId,
+  resolveIngestToken,
+  sanitizeHandle,
+} from './src/engine/liveIdentity';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -54,6 +61,7 @@ app.get('/api/health', (_req: Request, res: Response) => {
     geminiConfigured: Boolean(
       process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY',
     ),
+    liveIngest: ingestToken() ? 'ready' : 'disabled',
   });
 });
 
@@ -87,10 +95,54 @@ app.get('/api/live/stream', (req: Request, res: Response) => {
   });
 });
 
-// Client or companion app posts a live chat message
-app.post('/api/live/chat', (req: Request, res: Response) => {
+// --- Live ingest: who may post, and who a message came from ---
+// This endpoint used to trust whatever `uniqueId` the body claimed, so any
+// request that named itself after the seated challenger could move that
+// player's pieces. Two things close that: a shared secret the relay must present,
+// and an actor id minted here instead of the handle the viewer typed.
+//
+// Setup (TikFinity / TikTokLive relay / OBS script):
+//   header  x-ctl-ingest-token: <same value as CTL_LIVE_INGEST_TOKEN in .env>
+//   POST    /api/live/webhook   {"uniqueId":"..","comment":"p2 bình 5"}
+//   POST    /api/live/webhook   {"uniqueId":"..","giftName":"Rose"}
+//   POST    /api/live/chat      {"username":"..","text":".."}
+function ingestToken(): string | undefined {
+  return resolveIngestToken(process.env.CTL_LIVE_INGEST_TOKEN);
+}
+
+// Hash first so the comparison is over equal-length digests regardless of token length.
+function tokenMatches(presented: string, expected: string): boolean {
+  return timingSafeEqual(
+    createHash('sha256').update(presented).digest(),
+    createHash('sha256').update(expected).digest(),
+  );
+}
+
+// handle -> actor id, for every handle actually seen on the wire.
+const relayActors = new Map<string, string>();
+
+function requireIngestAuth(req: Request, res: Response, next: NextFunction) {
+  const token = ingestToken();
+  if (!token) {
+    res.status(503).json({
+      error:
+        'Live ingest đang tắt: đặt CTL_LIVE_INGEST_TOKEN vào .env rồi khởi động lại server.',
+      code: 'INGEST_NOT_CONFIGURED',
+    });
+    return;
+  }
+  const header = req.get('x-ctl-ingest-token') ?? req.get('authorization') ?? '';
+  const presented = header.replace(/^Bearer\s+/i, '').trim();
+  if (!presented || !tokenMatches(presented, token)) {
+    res.status(401).json({ error: 'Sai mã ingest.', code: 'BAD_INGEST_TOKEN' });
+    return;
+  }
+  next();
+}
+
+app.post('/api/live/chat', requireIngestAuth, (req: Request, res: Response) => {
   const body = req.body ?? {};
-  const username = String(body.username ?? 'Khách TikTok').trim().slice(0, 40);
+  const username = displayHandle(sanitizeHandle(body.username, 'Khách TikTok'));
   const text = String(body.text ?? '').trim().slice(0, 200);
   if (!text) {
     res.status(400).json({ error: 'Nội dung tin nhắn không được để trống.' });
@@ -100,6 +152,7 @@ app.post('/api/live/chat', (req: Request, res: Response) => {
   const eventPayload = {
     id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
     username,
+    actorId: reserveActorId(username, relayActors),
     text,
     gender: body.gender === 'nu' ? 'nu' : body.gender === 'nam' ? 'nam' : undefined,
     age: typeof body.age === 'number' ? body.age : undefined,
@@ -112,13 +165,14 @@ app.post('/api/live/chat', (req: Request, res: Response) => {
 });
 
 // Real TikTok Live Webhook compatible with TikFinity / TikTokLive relay / OBS scripts
-app.post('/api/live/webhook', (req: Request, res: Response) => {
+app.post('/api/live/webhook', requireIngestAuth, (req: Request, res: Response) => {
   const body = req.body ?? {};
-  const username = String(
-    body.uniqueId ?? body.nickname ?? body.username ?? body.user ?? 'TikTokViewer',
-  )
-    .trim()
-    .slice(0, 40);
+  const username = displayHandle(
+    sanitizeHandle(
+      body.uniqueId ?? body.nickname ?? body.username ?? body.user,
+      'TikTokViewer',
+    ),
+  );
   const text = String(body.comment ?? body.message ?? body.text ?? '').trim().slice(0, 200);
   const giftName = body.giftName ? String(body.giftName).slice(0, 60) : undefined;
 
@@ -129,7 +183,8 @@ app.post('/api/live/webhook', (req: Request, res: Response) => {
 
   const eventPayload = {
     id: `tt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-    username: username.startsWith('@') ? username : `@${username}`,
+    username,
+    actorId: reserveActorId(username, relayActors),
     text: text || `đã tặng quà ${giftName}!`,
     giftName,
     source: 'tiktok_webhook',
@@ -569,6 +624,11 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[Ky Dai Giang Ho 3D] Listening on http://0.0.0.0:${PORT}`);
+    console.log(
+      ingestToken()
+        ? '[live] ingest ready: relay POSTs need the x-ctl-ingest-token header.'
+        : '[live] CTL_LIVE_INGEST_TOKEN unset - relay POSTs get 503, so no anonymous writes reach the board.',
+    );
   });
 }
 

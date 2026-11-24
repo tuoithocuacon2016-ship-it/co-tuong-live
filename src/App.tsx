@@ -42,6 +42,7 @@ import {
   enqueueChallenger,
   pickNextChallenger,
 } from './engine/matchmaker';
+import { actorIdFor, isLocalActor } from './engine/liveIdentity';
 import {
   MATCH_PHASE_LABELS_VI,
   PerformanceGesture,
@@ -80,17 +81,23 @@ function checkInitialTikTok(): boolean {
   return new URLSearchParams(window.location.search).get('tiktok') === '1';
 }
 
+// Seats driven from this browser (Studio panel, quick match, seeded demo
+// players) speak as `local:` actors. A relay viewer who claims the same handle
+// gets `actor:@kiemkhach_vn` from the server, which never matches.
+const localSeat = (handle: string) => actorIdFor('local', handle);
+
 const INITIAL_CHALLENGER: ChallengerEntry = createChallenger(
   '@KiemKhach_VN',
+  localSeat('@KiemKhach_VN'),
   'nam',
   26,
   matchGuestCharacter('nam', 26),
 );
 
 const INITIAL_QUEUE: ChallengerEntry[] = [
-  createChallenger('@TieuYenNhi_99', 'nu', 24),
-  createChallenger('@LaoGiaCoTuong', 'nam', 64),
-  createChallenger('@MinhNguyet_88', 'nu', 34),
+  createChallenger('@TieuYenNhi_99', localSeat('@TieuYenNhi_99'), 'nu', 24),
+  createChallenger('@LaoGiaCoTuong', localSeat('@LaoGiaCoTuong'), 'nam', 64),
+  createChallenger('@MinhNguyet_88', localSeat('@MinhNguyet_88'), 'nu', 34),
 ];
 
 export default function App() {
@@ -742,9 +749,24 @@ export default function App() {
     (
       username: string,
       text: string,
-      meta?: { gender?: GuestGender; age?: number; giftName?: string },
+      meta?: {
+        gender?: GuestGender;
+        age?: number;
+        giftName?: string;
+        actorId?: string;
+        origin?: 'local' | 'relay';
+      },
     ) => {
       const currentChallenger = activeChallengerRef.current;
+      // Identity is the id the ingest server minted for this viewer
+      // (`src/engine/liveIdentity.ts`); the handle is display text anyone may
+      // type. Messages from the SSE bus must carry that id - a remote event
+      // without one gets no authority, so an old relay or a new event kind
+      // cannot fall back into "this is the host typing". With no remote origin
+      // at all the message came from this browser, which is the host.
+      const isRemote = meta?.origin === 'relay';
+      const actorId = meta?.actorId ?? (isRemote ? '' : actorIdFor('local', username));
+      const isLocalOperator = !isRemote && isLocalActor(actorId);
 
       // 0. Live TikTok Gift Reaction -> Immediate joyful thank-you & synced gesture!
       if (meta?.giftName) {
@@ -771,14 +793,21 @@ export default function App() {
         return;
       }
 
+      // A relay event with no actor id cannot be attributed to anyone, so it may
+      // neither claim a seat nor move: it is shown as chat text and dropped.
+      if (isRemote && !meta?.actorId) {
+        appendMessage({ username, text, kind: 'viewer' });
+        return;
+      }
+
       const intent = classifyChatMessage(text);
-      const isChallenger =
-        username.toLowerCase() === currentChallenger.username.toLowerCase();
+      const isChallenger = isLocalOperator || actorId === currentChallenger.actorId;
 
       // 1. Viewer requests to join challenge queue (!choi / !thachdau / lên đài)
       if (intent.type === 'challenge') {
         const entry = createChallenger(
           username,
+          actorId,
           meta?.gender ?? (Math.random() > 0.45 ? 'nam' : 'nu'),
           meta?.age ?? 22 + Math.floor(Math.random() * 28),
         );
@@ -794,9 +823,16 @@ export default function App() {
 
       // 2. Quick gender+age profile command (!nam 28, !nu 24)
       if (intent.type === 'guest_profile' && intent.gender && intent.age) {
+        // The seat is not up for grabs: whoever types a profile command only
+        // rewrites the *current* challenger when they hold that seat.
+        if (!isChallenger) {
+          appendMessage({ username, text, kind: 'viewer' });
+          return;
+        }
         const matched = matchGuestCharacter(intent.gender, intent.age);
-        const updated = createChallenger(username, intent.gender, intent.age, matched);
+        const updated = createChallenger(username, actorId, intent.gender, intent.age, matched);
         setActiveChallenger(updated);
+        activeChallengerRef.current = updated;
         stageRef.current?.setGuestCharacter(matched);
         appendMessage({
           username: BOT_MASTER_PROFILE.name,
@@ -980,6 +1016,10 @@ export default function App() {
             gender: data.gender,
             age: data.age,
             giftName: data.giftName,
+            // Everything on this bus came over the network, so it is identified
+            // only by the id the server minted, never by the handle in the body.
+            origin: 'relay',
+            actorId: typeof data.actorId === 'string' ? data.actorId : undefined,
           });
         }
       } catch {
@@ -1201,7 +1241,8 @@ export default function App() {
       explicitChar?: WuxiaCharacterProfile,
     ) => {
       const char = explicitChar ?? matchGuestCharacter(gender, age);
-      const entry = createChallenger(username || '@KhachMoi', gender, age, char);
+      const handle = username || '@KhachMoi';
+      const entry = createChallenger(handle, localSeat(handle), gender, age, char);
       setActiveChallenger(entry);
       activeChallengerRef.current = entry;
       stageRef.current?.setGuestCharacter(char);
@@ -1304,24 +1345,19 @@ export default function App() {
     [commentary, hostEmotion, muted, triggerBotSpeaking, voiceEnabled],
   );
 
-  const handleTestWebhook = useCallback(async () => {
-    try {
-      await fetch('/api/live/webhook', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          uniqueId: activeChallengerRef.current.username.replace(/^@/, ''),
-          comment: boardRef.current.moveCount === 0 ? 'p2 bình 5' : 'Chào Kỳ Ma từ TikTok Live Webhook!',
-        }),
-      });
-    } catch {
-      appendMessage({
-        username: 'Hệ thống',
-        text: 'Không gửi được tín hiệu thử nghiệm tới /api/live/webhook.',
-        kind: 'system',
-      });
-    }
-  }, [appendMessage]);
+  // The Studio Test button used to POST /api/live/webhook while claiming the
+  // seated player's handle, which is exactly the spoof the relay endpoint now
+  // refuses: ingest needs the server-side token, and identity comes from the
+  // actor id the server mints. So the button injects the same event locally,
+  // as the actor currently holding the seat.
+  const handleTestWebhook = useCallback(() => {
+    const seated = activeChallengerRef.current;
+    const comment =
+      boardRef.current.moveCount === 0
+        ? 'p2 bình 5'
+        : 'Chào Kỳ Ma từ TikTok Live Webhook!';
+    processIncomingChatRef.current(seated.username, comment, { actorId: seated.actorId });
+  }, []);
 
   // Global keyboard shortcuts (Enter/Space on Title, H dock toggle, P/Esc pause, M mute)
   useEffect(() => {
