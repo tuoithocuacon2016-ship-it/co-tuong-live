@@ -67,6 +67,7 @@ import {
   tallyCrowdVotes,
   triageLiveComment,
 } from './engine/liveInteraction';
+import { actorIdFor } from './engine/liveIdentity';
 import { CameraPreset, XiangqiStage, ZoomFocus } from './scene/XiangqiStage';
 import {
   DEFAULT_PIECE_STYLE,
@@ -135,15 +136,16 @@ function loadSavedPieceStyle(): PieceVisualConfig {
 
 const INITIAL_CHALLENGER: ChallengerEntry = createChallenger(
   '@KiemKhach_VN',
+  actorIdFor('local', '@KiemKhach_VN'),
   'nam',
   26,
   matchGuestCharacter('nam', 26),
 );
 
 const INITIAL_QUEUE: ChallengerEntry[] = [
-  createChallenger('@TieuYenNhi_99', 'nu', 24),
-  createChallenger('@LaoGiaCoTuong', 'nam', 64),
-  createChallenger('@MinhNguyet_88', 'nu', 34),
+  createChallenger('@TieuYenNhi_99', actorIdFor('local', '@TieuYenNhi_99'), 'nu', 24),
+  createChallenger('@LaoGiaCoTuong', actorIdFor('local', '@LaoGiaCoTuong'), 'nam', 64),
+  createChallenger('@MinhNguyet_88', actorIdFor('local', '@MinhNguyet_88'), 'nu', 34),
 ];
 
 export default function App() {
@@ -167,7 +169,7 @@ export default function App() {
     {
       id: 'init_1',
       username: BOT_MASTER_PROFILE.name,
-      text: 'Đêm tân hôn nến đỏ khai cuộc! Chàng thắng thiếp thì thiếp nghe lời răm rắp, thua thì ôm gối ngắm trăng nha! Chat "!choi" để lên đài hoặc gửi nước đi như "p2 bình 5", "m8 tiến 7", "x7 bình 3".',
+      text: 'Đêm tân hôn nến đỏ khai cuộc! Chàng thắng thiếp thì thiếp giao lại một lớp hồi môn, thua thì ôm gối ngắm trăng nha! Chat "!choi" để lên đài hoặc gửi nước đi như "p2 bình 5", "m8 tiến 7", "x7 bình 3".',
       timestamp: Date.now() - 4000,
       kind: 'bot',
     },
@@ -186,7 +188,7 @@ export default function App() {
     actor: BOT_MASTER_PROFILE.name,
     notation: 'Khai Cuộc',
     motif: 'Hoa Chúc Khai Đài',
-    line: 'Chào hai họ phòng live! Trước giờ động phòng hoa chúc... chàng đánh với thiếp một ván nhé — thắng thì thiếp nghe lời chàng răm rắp, còn thua thì ra hành lang ngắm trăng nha!',
+    line: 'Chào hai họ phòng live! Trước giờ động phòng hoa chúc... chàng đánh với thiếp một ván nhé — thắng thì thiếp giao lại một lớp hồi môn, còn thua thì ra hành lang ngắm trăng nha!',
     mood: 'calm',
     emotion: 'amused',
     emotionLabel: EMOTION_LABELS_VI.amused,
@@ -1074,11 +1076,19 @@ export default function App() {
     (
       username: string,
       text: string,
-      meta?: { gender?: GuestGender; age?: number; giftName?: string; fromVoice?: boolean },
+      meta?: {
+        actorId?: string;
+        gender?: GuestGender;
+        age?: number;
+        giftName?: string;
+        fromVoice?: boolean;
+      },
     ) => {
       const currentChallenger = activeChallengerRef.current;
-      const isChallenger =
-        username.toLowerCase() === currentChallenger.username.toLowerCase();
+      // Unforgeable identity check: remote relay events carry server-minted `actor:...` IDs,
+      // while local Studio panel / voice inputs mint `local:...` IDs.
+      const senderActorId = meta?.actorId ?? actorIdFor('local', username);
+      const isChallenger = senderActorId === currentChallenger.actorId;
 
       // 0. Live TikTok Gift Reaction -> Immediate joyful thank-you + VIP Fast-Track Queue Upgrade!
       if (meta?.giftName) {
@@ -1093,6 +1103,7 @@ export default function App() {
           const vipEntry = {
             ...createChallenger(
               username,
+              senderActorId,
               meta.gender ?? 'nam',
               meta.age ?? 26,
             ),
@@ -1126,6 +1137,7 @@ export default function App() {
       if (intent.type === 'challenge') {
         const entry = createChallenger(
           username,
+          senderActorId,
           meta?.gender ?? (Math.random() > 0.45 ? 'nam' : 'nu'),
           meta?.age ?? 22 + Math.floor(Math.random() * 28),
         );
@@ -1140,12 +1152,18 @@ export default function App() {
       }
 
       // 2. Seat-Locked Gender+Age Profile Command (!nam 28, !nu 24)
-      // NEVER lets a random viewer hijack the active challenger's seat!
+      // NEVER lets a random viewer or lookalike handle hijack the active challenger's seat!
       if (intent.type === 'guest_profile' && intent.gender && intent.age) {
         const matched = matchGuestCharacter(intent.gender, intent.age);
-        const updated = createChallenger(username, intent.gender, intent.age, matched);
+        const updated = createChallenger(
+          username,
+          senderActorId,
+          intent.gender,
+          intent.age,
+          matched,
+        );
         const res = applySeatLockedProfileUpdate({
-          senderUsername: username,
+          senderActorId,
           activeChallenger: currentChallenger,
           queue: queueRef.current,
           updatedEntry: updated,
@@ -1181,7 +1199,9 @@ export default function App() {
       if (redTurnOpen && liveModeRef.current === 'crowd_vote') {
         const parsed = parseVietnameseChatMove(liveBoard, text, preferredPieceIdRef.current);
         if (parsed.move && parsed.notation) {
-          setCrowdVote((prev) => recordCrowdVote(prev, username, parsed.move!, liveBoard.grid));
+          setCrowdVote((prev) =>
+            recordCrowdVote(prev, username, parsed.move!, liveBoard.grid, senderActorId),
+          );
           appendMessage({
             username,
             text: `[Vote ${parsed.notation}] ${text}`,
@@ -1558,6 +1578,10 @@ export default function App() {
         const data = JSON.parse((ev as MessageEvent).data);
         if ((data?.text || data?.giftName) && data?.username) {
           processIncomingChatRef.current(data.username, data.text || '', {
+            actorId:
+              typeof data.actorId === 'string' && data.actorId.length > 0
+                ? data.actorId
+                : actorIdFor('relay', String(data.username)),
             gender: data.gender,
             age: data.age,
             giftName: data.giftName,
@@ -2049,7 +2073,14 @@ export default function App() {
       explicitChar?: WuxiaCharacterProfile,
     ) => {
       const char = explicitChar ?? matchGuestCharacter(gender, age);
-      const entry = createChallenger(username || '@KhachMoi', gender, age, char);
+      const safeName = username || '@KhachMoi';
+      const entry = createChallenger(
+        safeName,
+        actorIdFor('local', safeName),
+        gender,
+        age,
+        char,
+      );
       setActiveChallenger(entry);
       activeChallengerRef.current = entry;
       stageRef.current?.setGuestCharacter(char);
@@ -2168,7 +2199,7 @@ export default function App() {
 
   const handleTestWebhook = useCallback(async () => {
     try {
-      await fetch('/api/live/webhook', {
+      const resp = await fetch('/api/live/webhook', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2176,6 +2207,20 @@ export default function App() {
           comment: boardRef.current.moveCount === 0 ? 'p2 bình 5' : 'Chào Kỳ Ma từ TikTok Live Webhook!',
         }),
       });
+      if (!resp.ok) {
+        const payload = await resp.json().catch(() => ({}));
+        const code = String(payload?.code ?? '');
+        appendMessage({
+          username: 'Hệ thống',
+          text:
+            code === 'INGEST_NOT_CONFIGURED'
+              ? 'Webhook đang khóa an toàn (503): hãy cấu hình CTL_LIVE_INGEST_TOKEN trong .env / Secrets và gửi header x-ctl-ingest-token từ relay.'
+              : code === 'BAD_INGEST_TOKEN'
+                ? 'Webhook đã xác thực bảo mật (401): relay cần gửi đúng header x-ctl-ingest-token.'
+                : `Webhook phản hồi mã ${resp.status}.`,
+          kind: 'system',
+        });
+      }
     } catch {
       appendMessage({
         username: 'Hệ thống',

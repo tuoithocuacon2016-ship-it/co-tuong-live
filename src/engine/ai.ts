@@ -32,6 +32,7 @@ import {
   unmakeNullMoveFast,
 } from './xiangqiFast';
 import { colToFile, formatMoveVietnamese } from './notation';
+import { detectKillPattern } from './patterns';
 
 export type BotDifficulty = 'nhap_mon' | 'cao_thu' | 'tong_su';
 
@@ -779,6 +780,22 @@ export function detectMoveMotif(
   const opp = oppositeSide(move.piece.side);
   const givesCheck = isInCheck(afterGrid, opp);
   const toFile = colToFile(move.to.col, move.piece.side);
+  const pattern = detectKillPattern(prevGrid, afterGrid, move);
+
+  // Authentic classical Xiangqi kill/tactical patterns take priority on forcing checks
+  // and signature tactical strikes (Đại Đao Hoạch Tâm, Pháo Niễn Đan Sa, Mã Hậu Pháo, etc.)
+  if (pattern) {
+    if (
+      pattern.forcing ||
+      pattern.id === 'dai_dao_hoach_tam' ||
+      pattern.id === 'phao_nan_dan_sa'
+    ) {
+      return pattern.nameVi;
+    }
+    if (!move.captured && pattern.priority >= 60) {
+      return pattern.nameVi;
+    }
+  }
 
   if (givesCheck && move.captured) return 'Sát Chiêu Đoạt Mệnh';
   if (givesCheck) return 'Kiếm Khí Chiếu Tướng';
@@ -790,15 +807,14 @@ export function detectMoveMotif(
     return 'Ra Chiêu Ăn Quân';
   }
 
+  if (pattern) {
+    return pattern.nameVi;
+  }
+
   if (move.piece.type === 'cannon' && toFile === 5 && move.from.row === move.to.row) {
     return 'Pháo Đầu Trấn Trung';
   }
   if (move.piece.type === 'horse') {
-    const enemyPalaceCorner =
-      move.piece.side === 'red'
-        ? move.to.row === 2 && (move.to.col === 2 || move.to.col === 6)
-        : move.to.row === 7 && (move.to.col === 2 || move.to.col === 6);
-    if (enemyPalaceCorner) return 'Ngọa Tào Mã Áp Cung';
     if (toFile === 3 || toFile === 7) return 'Bình Phong Khởi Mã';
     return 'Phi Mã Xuất Trận';
   }

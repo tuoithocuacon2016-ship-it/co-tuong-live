@@ -11,7 +11,7 @@ import {
   isInCheck,
   makeMove,
 } from './xiangqi';
-import { analyzePosition } from './ai';
+import { analyzePosition, detectMoveMotif } from './ai';
 import { createFastBoard, isSideInCheckFast, SIDE_BLACK, SIDE_RED } from './xiangqiFast';
 
 function buildBoard(
@@ -334,5 +334,41 @@ test('Core AI upgrades: Aspiration Windows + Countermove + Principal Variation (
   );
   assert.ok(typeof res.elapsedMs === 'number' && res.elapsedMs >= 0);
 });
+
+test('detectMoveMotif surfaces authentic Xiangqi kill patterns (Điếu Ngư Mã & Song Xa Thác)', () => {
+  // 1. Horse landing on (7,2) is Điếu Ngư Mã (NOT the legacy mislabel Ngọa Tào Mã)
+  const dieuNgu = buildBoard(
+    [
+      { r: 0, c: 3, side: 'black', type: 'king' },
+      { r: 5, c: 1, side: 'black', type: 'horse' },
+      { r: 9, c: 4, side: 'red', type: 'king' },
+      { r: 9, c: 3, side: 'red', type: 'advisor' },
+      { r: 9, c: 5, side: 'red', type: 'advisor' },
+    ],
+    'black',
+  );
+  const moveHorse = generateLegalMoves(dieuNgu.grid, 'black').find(
+    (m) => m.from.row === 5 && m.from.col === 1 && m.to.row === 7 && m.to.col === 2,
+  )!;
+  const afterHorse = makeMove(dieuNgu, moveHorse);
+  assert.equal(detectMoveMotif(dieuNgu.grid, moveHorse, afterHorse.grid), 'Điếu Ngư Mã');
+
+  // 2. Double chariot back-rank check surfaces Song Xa Thác
+  const songXa = buildBoard(
+    [
+      { r: 0, c: 3, side: 'black', type: 'king' },
+      { r: 4, c: 0, side: 'black', type: 'chariot' },
+      { r: 8, c: 1, side: 'black', type: 'chariot' },
+      { r: 9, c: 4, side: 'red', type: 'king' },
+    ],
+    'black',
+  );
+  const moveRook = generateLegalMoves(songXa.grid, 'black').find(
+    (m) => m.from.row === 4 && m.from.col === 0 && m.to.row === 9 && m.to.col === 0,
+  )!;
+  const afterRook = makeMove(songXa, moveRook);
+  assert.equal(detectMoveMotif(songXa.grid, moveRook, afterRook.grid), 'Song Xa Thác');
+});
+
 
 

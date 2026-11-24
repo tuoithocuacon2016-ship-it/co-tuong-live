@@ -110,8 +110,7 @@ export function enqueueChallengerWithPriority(
   queue: QueuedChallenger[],
   entry: QueuedChallenger,
 ): QueuedChallenger[] {
-  const lower = entry.username.toLowerCase();
-  const existing = queue.find((q) => q.username.toLowerCase() === lower);
+  const existing = queue.find((q) => q.actorId === entry.actorId);
   const merged: QueuedChallenger = existing
     ? {
         ...existing,
@@ -122,7 +121,7 @@ export function enqueueChallengerWithPriority(
       }
     : entry;
 
-  const without = queue.filter((q) => q.username.toLowerCase() !== lower);
+  const without = queue.filter((q) => q.actorId !== entry.actorId);
   const next = [...without, merged];
 
   next.sort((a, b) => {
@@ -138,11 +137,11 @@ export function enqueueChallengerWithPriority(
 
 /**
  * Seat-locked profile update:
- * - Only updates activeChallenger if the sender IS the active challenger.
- * - Otherwise updates the sender's entry in the queue (NEVER hijacks the live seat!).
+ * - Only updates activeChallenger if the sender's unforgeable actorId matches the active seat.
+ * - Otherwise updates the sender's entry in the queue (NEVER lets a lookalike hijack the live seat!).
  */
 export function applySeatLockedProfileUpdate(params: {
-  senderUsername: string;
+  senderActorId: string;
   activeChallenger: QueuedChallenger;
   queue: QueuedChallenger[];
   updatedEntry: QueuedChallenger;
@@ -151,9 +150,8 @@ export function applySeatLockedProfileUpdate(params: {
   updatedQueue: QueuedChallenger[];
   wasSeatLocked: boolean;
 } {
-  const { senderUsername, activeChallenger, queue, updatedEntry } = params;
-  const isSameActive =
-    senderUsername.toLowerCase() === activeChallenger.username.toLowerCase();
+  const { senderActorId, activeChallenger, queue, updatedEntry } = params;
+  const isSameActive = senderActorId === activeChallenger.actorId;
 
   if (isSameActive) {
     return {
@@ -252,8 +250,9 @@ export function recordCrowdVote(
   username: string,
   move: Move,
   grid: BoardState['grid'],
+  voterId?: string,
 ): CrowdVoteState {
-  const key = username.trim().toLowerCase() || 'viewer';
+  const key = (voterId ?? username).trim().toLowerCase() || 'viewer';
   const notation = formatMoveVietnamese(grid, move);
   const nextMap = {
     ...state.votesByUser,

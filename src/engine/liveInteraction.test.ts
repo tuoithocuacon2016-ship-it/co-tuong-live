@@ -12,6 +12,7 @@ import {
   triageLiveComment,
 } from './liveInteraction';
 import { createChallenger } from './matchmaker';
+import { actorIdFor } from './liveIdentity';
 import {
   classifyChatMessage,
   normalizeSpokenMoveNumbers,
@@ -115,13 +116,19 @@ test('Comment triage detects backseat coaching, filters spam, and prioritizes ch
   assert.equal(spam.category, 'spam_or_low');
 });
 
-test('Seat lock prevents viewers from hijacking active challenger seat via !nam/!nu and VIP gifts jump queue', () => {
-  const active = createChallenger('@TanLang_1', 'nam', 26);
-  const viewerEntry = createChallenger('@ViewerHack', 'nu', 22, matchGuestCharacter('nu', 22));
+test('Seat lock prevents viewers and same-name relay lookalikes from hijacking active challenger seat via !nam/!nu and VIP gifts jump queue', () => {
+  const active = createChallenger('@TanLang_1', actorIdFor('local', '@TanLang_1'), 'nam', 26);
+  const viewerEntry = createChallenger(
+    '@ViewerHack',
+    actorIdFor('relay', '@ViewerHack'),
+    'nu',
+    22,
+    matchGuestCharacter('nu', 22),
+  );
 
   // Non-challenger sends !nu 22 -> MUST NOT hijack active challenger!
   const locked = applySeatLockedProfileUpdate({
-    senderUsername: '@ViewerHack',
+    senderActorId: viewerEntry.actorId,
     activeChallenger: active,
     queue: [],
     updatedEntry: viewerEntry,
@@ -131,20 +138,54 @@ test('Seat lock prevents viewers from hijacking active challenger seat via !nam/
   assert.equal(locked.updatedQueue.length, 1);
   assert.equal(locked.updatedQueue[0].username, '@ViewerHack');
 
-  // Active challenger updates own profile -> ALLOWED!
-  const selfUpdated = applySeatLockedProfileUpdate({
-    senderUsername: '@TanLang_1',
+  // Remote relay lookalike with IDENTICAL handle "@TanLang_1" -> STILL blocked because actorId differs!
+  const spoofEntry = createChallenger(
+    '@TanLang_1',
+    actorIdFor('relay', '@TanLang_1'),
+    'nu',
+    19,
+    matchGuestCharacter('nu', 19),
+  );
+  const spoofAttempt = applySeatLockedProfileUpdate({
+    senderActorId: spoofEntry.actorId,
     activeChallenger: active,
     queue: locked.updatedQueue,
-    updatedEntry: createChallenger('@TanLang_1', 'nam', 45, matchGuestCharacter('nam', 45)),
+    updatedEntry: spoofEntry,
+  });
+  assert.equal(spoofAttempt.wasSeatLocked, true);
+  assert.equal(spoofAttempt.updatedActive, null);
+
+  // Active challenger updates own profile with matching actorId -> ALLOWED!
+  const selfUpdated = applySeatLockedProfileUpdate({
+    senderActorId: active.actorId,
+    activeChallenger: active,
+    queue: locked.updatedQueue,
+    updatedEntry: createChallenger(
+      '@TanLang_1',
+      active.actorId,
+      'nam',
+      45,
+      matchGuestCharacter('nam', 45),
+    ),
   });
   assert.equal(selfUpdated.wasSeatLocked, false);
   assert.equal(selfUpdated.updatedActive?.age, 45);
 
   // VIP gift sender jumps ahead of regular queued player!
-  const regular1 = { ...createChallenger('@Regular1', 'nam', 24), joinedAt: 100 };
-  const regular2 = { ...createChallenger('@Regular2', 'nu', 23), joinedAt: 200 };
-  const vip = { ...createChallenger('@VipGift', 'nam', 30), joinedAt: 300, isVip: true, giftCount: 1 };
+  const regular1 = {
+    ...createChallenger('@Regular1', actorIdFor('relay', '@Regular1'), 'nam', 24),
+    joinedAt: 100,
+  };
+  const regular2 = {
+    ...createChallenger('@Regular2', actorIdFor('relay', '@Regular2'), 'nu', 23),
+    joinedAt: 200,
+  };
+  const vip = {
+    ...createChallenger('@VipGift', actorIdFor('relay', '@VipGift'), 'nam', 30),
+    joinedAt: 300,
+    isVip: true,
+    giftCount: 1,
+  };
   let q = enqueueChallengerWithPriority([], regular1);
   q = enqueueChallengerWithPriority(q, regular2);
   q = enqueueChallengerWithPriority(q, vip);
