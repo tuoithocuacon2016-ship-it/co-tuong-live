@@ -1,10 +1,13 @@
 import {
   BoardState,
   Move,
+  PIECE_NAME_VI,
   PIECE_SHORT_VI,
   PieceType,
   Side,
   generateLegalMoves,
+  isInCheck,
+  applyMoveOnGrid,
 } from './xiangqi';
 
 export type MoveDirection = 'tien' | 'thoai' | 'binh';
@@ -86,9 +89,49 @@ export function normalizeVietnamese(raw: string): string {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/đ/g, 'd')
-    .replace(/[^a-z0-9.+\-=\s!]/g, ' ')
+    .replace(/[^a-z0-9.+\-=/\s!]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/**
+ * Convert spoken Vietnamese number words into digits when used in chess commands.
+ * Example: "pháo hai bình năm" -> "phao 2 binh 5", "mã tám tiến bảy" -> "ma 8 tien 7".
+ * Carefully avoids converting "sau" (rear/back) when it means piece position ("xe sau tien 2").
+ */
+export function normalizeSpokenMoveNumbers(raw: string): string {
+  let s = normalizeVietnamese(raw);
+  // Protect "sau" as position disambiguator when followed by an action verb
+  s = s.replace(
+    /\b(sau)\s+(tien|tan|len|thoai|lui|ve|binh|ngang|vo|vao|sang|qua|ra|rut|keo)\b/g,
+    '__REAR__ $2',
+  );
+
+  const numMap: Array<[RegExp, string]> = [
+    [/\bmot\b/g, '1'],
+    [/\bhai\b/g, '2'],
+    [/\bba\b/g, '3'],
+    [/\b(bon|tu)\b/g, '4'],
+    [/\b(nam|lam)\b/g, '5'],
+    [/\bsau\b/g, '6'],
+    [/\bbay\b/g, '7'],
+    [/\btam\b/g, '8'],
+    [/\bchin\b/g, '9'],
+  ];
+
+  // Only convert spoken numbers when a chess piece or action word is present in the phrase
+  const hasChessCue =
+    /\b(tuong|soai|tg|tinh|voi|si|sy|ma|ngua|xe|xa|phao|tot|binh|chot|tien|tan|len|thoai|lui|ve|ngang|vo|vao|sang|qua|ra|chieu|an|dap|bat|day|rut|keo)\b/.test(
+      s,
+    );
+
+  if (hasChessCue) {
+    for (const [re, digit] of numMap) {
+      s = s.replace(re, digit);
+    }
+  }
+
+  return s.replace(/__REAR__/g, 'sau').replace(/\s+/g, ' ').trim();
 }
 
 const PIECE_ALIASES: Array<[RegExp, PieceType]> = [
@@ -117,15 +160,54 @@ function parsePieceToken(token: string): PieceType | null {
   return null;
 }
 
+function getCandidatePieceTypes(rawToken: string): PieceType[] {
+  const t = rawToken.trim();
+  if (t === 'tuong') {
+    // Without accents, "tuong" can mean either Tượng (elephant) or Tướng (king)
+    return ['elephant', 'king'];
+  }
+  const pt = parsePieceToken(t);
+  return pt ? [pt] : [];
+}
+
 function parseActionToken(token: string): MoveDirection | null {
   const t = token.trim();
-  if (t === 'tien' || t === 'tan' || t === 'len' || t === 't' || t === '.' || t === '+') {
+  if (
+    t === 'tien' ||
+    t === 'tan' ||
+    t === 'len' ||
+    t === 'day' ||
+    t === 'phong' ||
+    t === 't' ||
+    t === '.' ||
+    t === '+'
+  ) {
     return 'tien';
   }
-  if (t === 'thoai' || t === 'lui' || t === 've' || t === 'th' || t === '/') {
+  if (
+    t === 'thoai' ||
+    t === 'lui' ||
+    t === 've' ||
+    t === 'rut' ||
+    t === 'keo' ||
+    t === 'giat' ||
+    t === 'th' ||
+    t === '/'
+  ) {
     return 'thoai';
   }
-  if (t === 'binh' || t === 'ngang' || t === 'b' || t === '-' || t === '=') {
+  if (
+    t === 'binh' ||
+    t === 'ngang' ||
+    t === 'vo' ||
+    t === 'vao' ||
+    t === 'sang' ||
+    t === 'qua' ||
+    t === 'ra' ||
+    t === 'b' ||
+    t === '-' ||
+    t === '='
+  ) {
     return 'binh';
   }
   return null;
@@ -136,6 +218,10 @@ export interface ParsedMoveResult {
   notation?: string;
   error?: string;
   ambiguous?: boolean;
+  /** Multiple matching legal moves when the command is ambiguous (e.g., "xe tiến 2") */
+  candidates?: Move[];
+  /** True when the message sounds like a natural-language move that can benefit from AI NLU fallback */
+  needsAiFallback?: boolean;
 }
 
 function matchesMoveDirectionAndValue(
@@ -164,19 +250,20 @@ function matchesMoveDirectionAndValue(
 }
 
 /**
- * Parse a Vietnamese chat move command such as:
- * - "x7 bình 3" / "xe 7 binh 3" / "x7-3" / "x7=3"
- * - "p2 bình 5" / "pháo 2 bình 5"
- * - "m8 tiến 7" / "mã 8 tấn 7" / "m8.7"
- * - "x1 thoái 2" / "b7 tiến 1"
- * - Contextual shorthand: "tiến 5", "thoái 1", "bình 4" (uses preferredPieceId or unique legal move)
+ * Parse a Vietnamese chat or voice move command such as:
+ * - Standard: "x7 bình 3", "xe 7 binh 3", "p2=5", "m8.7", "x1-2", "phao 2 tan 4"
+ * - Spoken Vietnamese: "pháo hai bình năm", "mã tám tiến bảy", "tốt bảy tiến một"
+ * - Ultra-compact live shorthand: "p25", "m87", "b71", "x12", "p2b5", "m8t7", "x1th2"
+ * - Natural phrases inside sentences: "anh đi pháo 2 vô 5 nha", "ra xe 9 sang 8", "kéo xe 1 về 2"
+ * - Direct capture / opening phrases: "pháo đầu", "xe ăn pháo", "pháo đập mã", "chiếu tướng"
+ * - Contextual shorthand: "tiến 5", "thoái 1", "bình 4"
  */
 export function parseVietnameseChatMove(
   state: BoardState,
   rawInput: string,
   preferredPieceId?: string | null,
 ): ParsedMoveResult {
-  const norm = normalizeVietnamese(rawInput);
+  const norm = normalizeSpokenMoveNumbers(rawInput);
   if (!norm || norm.startsWith('!')) {
     return { move: null };
   }
@@ -185,9 +272,9 @@ export function parseVietnameseChatMove(
   const legalMoves = generateLegalMoves(state.grid, side);
 
   // Pattern 1: Full move with piece + file + action + target
-  // Examples: "x7 binh 3", "xe 7 binh 3", "p2=5", "m8.7", "x1-2", "phao 2 tan 4"
+  // Supports natural verbs too: "pháo 2 vô 5", "xe 9 sang 8", "mã 8 lên 7", "xe 1 về 2", "p2b5", "m8t7", "x1th2"
   const fullWordRe =
-    /\b(tuong|soai|tg|tinh|voi|si|sy|ma|ngua|xe|xa|phao|tot|binh|chot|x|p|m|b|s|t)\s*([1-9])\s*(tien|tan|len|thoai|lui|ve|binh|ngang|[.+\-=])\s*([1-9])\b/;
+    /\b(tuong|soai|tg|tinh|voi|si|sy|ma|ngua|xe|xa|phao|tot|binh|chot|x|p|m|b|s|t)\s*([1-9])\s*(tien|tan|len|day|phong|thoai|lui|ve|rut|keo|giat|th|binh|ngang|vo|vao|sang|qua|ra|t|b|[.+\-=/])\s*([1-9])\b/;
   const fullMatch = norm.match(fullWordRe);
 
   if (fullMatch) {
@@ -195,15 +282,7 @@ export function parseVietnameseChatMove(
     const file = Number(fileRaw);
     const val = Number(valRaw);
     const dir = parseActionToken(actRaw);
-
-    // Handle ambiguity of "tuong" (can mean king or elephant in Vietnamese without accents)
-    const candidateTypes: PieceType[] = [];
-    if (pieceRaw === 'tuong') {
-      candidateTypes.push('elephant', 'king');
-    } else {
-      const pt = parsePieceToken(pieceRaw);
-      if (pt) candidateTypes.push(pt);
-    }
+    const candidateTypes = getCandidatePieceTypes(pieceRaw);
 
     if (dir && candidateTypes.length > 0) {
       const targetCol = fileToCol(file, side);
@@ -221,7 +300,6 @@ export function parseVietnameseChatMove(
         };
       }
       if (matches.length > 1) {
-        // Prefer front piece if user didn't specify trước/sau
         matches.sort((a, b) =>
           side === 'red' ? a.from.row - b.from.row : b.from.row - a.from.row,
         );
@@ -232,23 +310,103 @@ export function parseVietnameseChatMove(
       }
       return {
         move: null,
-        error: `Nước đi "${rawInput.trim()}" không hợp lệ hoặc bị cản/lộ mặt tướng.`,
+        error: `Nước đi "${rawInput.trim()}" không hợp lệ hoặc đang bị cản/lộ mặt tướng.`,
+      };
+    }
+  }
+
+  // Pattern 1B: Ultra-compact 2-digit shorthand used by TikTok live players!
+  // Examples: "p25" (P2 bình 5), "m87" (M8 tiến 7), "b71" (B7 tiến 1), "x98" (X9 bình 8), "s45", "t35"
+  const compactRe = /\b(tg|x|p|m|b|s|t)\s*([1-9])([1-9])\b/;
+  const compactMatch = norm.match(compactRe);
+  if (compactMatch) {
+    const [, pieceRaw, fileRaw, valRaw] = compactMatch;
+    const file = Number(fileRaw);
+    const val = Number(valRaw);
+    const candidateTypes = getCandidatePieceTypes(pieceRaw);
+    const targetCol = fileToCol(file, side);
+
+    if (candidateTypes.length > 0) {
+      const pieceMoves = legalMoves.filter(
+        (mv) => candidateTypes.includes(mv.piece.type) && mv.from.col === targetCol,
+      );
+
+      // Prefer natural direction by piece type:
+      // - horse/advisor/elephant: forward (tien) first, then retreat (thoai)
+      // - cannon/chariot: binh if moving to file val, or tien val steps
+      // - soldier: tien val first, then binh val
+      const orderedDirs: MoveDirection[] =
+        candidateTypes[0] === 'cannon'
+          ? ['binh', 'tien', 'thoai']
+          : candidateTypes[0] === 'chariot'
+            ? ['binh', 'tien', 'thoai']
+            : ['tien', 'binh', 'thoai'];
+
+      const matchedAcrossDirs: Move[] = [];
+      for (const dir of orderedDirs) {
+        const sub = pieceMoves.filter((mv) =>
+          matchesMoveDirectionAndValue(mv, side, dir, val),
+        );
+        for (const m of sub) {
+          if (!matchedAcrossDirs.includes(m)) matchedAcrossDirs.push(m);
+        }
+      }
+
+      if (matchedAcrossDirs.length === 1) {
+        return {
+          move: matchedAcrossDirs[0],
+          notation: formatMoveVietnamese(state.grid, matchedAcrossDirs[0]),
+        };
+      }
+      if (matchedAcrossDirs.length > 1) {
+        // For Cannon/Chariot opening like "p25" (P2 bình 5 vs P2 tiến 5), check if binh exists uniquely
+        const binhMatches = matchedAcrossDirs.filter((m) => m.from.row === m.to.row);
+        if (binhMatches.length === 1 && (pieceRaw === 'p' || pieceRaw === 'x') && val !== 1) {
+          return {
+            move: binhMatches[0],
+            notation: formatMoveVietnamese(state.grid, binhMatches[0]),
+          };
+        }
+        const tienMatches = matchedAcrossDirs.filter((m) =>
+          side === 'red' ? m.to.row < m.from.row : m.to.row > m.from.row,
+        );
+        if (tienMatches.length === 1 && (pieceRaw === 'm' || pieceRaw === 'b' || pieceRaw === 's' || pieceRaw === 't')) {
+          return {
+            move: tienMatches[0],
+            notation: formatMoveVietnamese(state.grid, tienMatches[0]),
+          };
+        }
+        return {
+          move: null,
+          ambiguous: true,
+          candidates: matchedAcrossDirs.slice(0, 3),
+          error: `Viết tắt "${compactMatch[0]}" có ${matchedAcrossDirs.length} cách đi (${matchedAcrossDirs
+            .slice(0, 2)
+            .map((m) => formatMoveVietnamese(state.grid, m))
+            .join(' hoặc ')}), nói rõ giúp thiếp nhé!`,
+        };
+      }
+      return {
+        move: null,
+        error: `Không thể đi "${rawInput.trim()}" ở thế cờ hiện tại.`,
       };
     }
   }
 
   // Pattern 2: Front/Back disambiguated move ("x truoc tien 2", "b sau binh 5")
   const posRe =
-    /\b(tuong|soai|tg|tinh|voi|si|sy|ma|ngua|xe|xa|phao|tot|binh|chot|x|p|m|b|s|t)\s*(truoc|tien|sau|hau)\s*(tien|tan|len|thoai|lui|ve|binh|ngang)\s*([1-9])\b/;
+    /\b(tuong|soai|tg|tinh|voi|si|sy|ma|ngua|xe|xa|phao|tot|binh|chot|x|p|m|b|s|t)\s*(truoc|tien|sau|hau)\s*(tien|tan|len|thoai|lui|ve|rut|binh|ngang|vo|vao|sang|qua|ra)\s*([1-9])\b/;
   const posMatch = norm.match(posRe);
   if (posMatch) {
     const [, pieceRaw, whichRaw, actRaw, valRaw] = posMatch;
-    const pt = parsePieceToken(pieceRaw);
+    const candidateTypes = getCandidatePieceTypes(pieceRaw);
     const dir = parseActionToken(actRaw);
     const val = Number(valRaw);
-    if (pt && dir) {
+    if (candidateTypes.length > 0 && dir) {
       const candidates = legalMoves.filter(
-        (mv) => mv.piece.type === pt && matchesMoveDirectionAndValue(mv, side, dir, val),
+        (mv) =>
+          candidateTypes.includes(mv.piece.type) &&
+          matchesMoveDirectionAndValue(mv, side, dir, val),
       );
       if (candidates.length > 0) {
         const wantFront = whichRaw === 'truoc' || whichRaw === 'tien';
@@ -269,8 +427,221 @@ export function parseVietnameseChatMove(
     }
   }
 
+  // Pattern 2B: Natural action-first phrasing ("lên mã 8", "ra xe 9", "đẩy tốt 7", "vào pháo 2", "pháo đầu")
+  if (/\bphao dau\b/.test(norm)) {
+    const centralFileCol = fileToCol(5, side);
+    const cannonCentral = legalMoves.filter(
+      (mv) =>
+        mv.piece.type === 'cannon' &&
+        mv.from.row === mv.to.row &&
+        mv.to.col === centralFileCol,
+    );
+    if (cannonCentral.length >= 1) {
+      // Classic Pháo Đầu prefers P2 bình 5 (right-side file 2) if available
+      const p2 = cannonCentral.find((m) => colToFile(m.from.col, side) === 2);
+      const chosen = p2 ?? cannonCentral[0];
+      return {
+        move: chosen,
+        notation: formatMoveVietnamese(state.grid, chosen),
+      };
+    }
+  }
+
+  // Natural verb + piece + file ("đẩy tốt 7", "lên mã 8", "nhảy mã 2", "phi tượng 3", "lên sĩ 4")
+  const verbPieceFileRe =
+    /\b(len|nhay|phi|day|tien|ra|chay)\s+(tuong|tinh|voi|si|sy|ma|ngua|xe|xa|phao|tot|binh|chot)\s*([1-9])\b/;
+  const vpfMatch = norm.match(verbPieceFileRe);
+  if (vpfMatch) {
+    const [, verbRaw, pieceRaw, fileRaw] = vpfMatch;
+    const file = Number(fileRaw);
+    const candidateTypes = getCandidatePieceTypes(pieceRaw);
+    const fromCol = fileToCol(file, side);
+    const forwardMatches = legalMoves.filter((mv) => {
+      if (!candidateTypes.includes(mv.piece.type) || mv.from.col !== fromCol) return false;
+      const isForward = side === 'red' ? mv.to.row < mv.from.row : mv.to.row > mv.from.row;
+      if (verbRaw === 'ra') return mv.from.row === mv.to.row || isForward;
+      return isForward;
+    });
+    if (forwardMatches.length === 1) {
+      return {
+        move: forwardMatches[0],
+        notation: formatMoveVietnamese(state.grid, forwardMatches[0]),
+      };
+    }
+    // For "lên mã 8" -> prefer central development (to file 7 or 3, i.e., Chính Mã) over edge (file 9/1)
+    if (forwardMatches.length > 1 && candidateTypes.includes('horse')) {
+      const chinhMa = forwardMatches.find((m) => {
+        const tf = colToFile(m.to.col, side);
+        return tf === 7 || tf === 3;
+      });
+      if (chinhMa) {
+        return {
+          move: chinhMa,
+          notation: formatMoveVietnamese(state.grid, chinhMa),
+        };
+      }
+    }
+    if (forwardMatches.length > 1 && candidateTypes.includes('elephant')) {
+      const centralEle = forwardMatches.find((m) => colToFile(m.to.col, side) === 5);
+      if (centralEle) {
+        return {
+          move: centralEle,
+          notation: formatMoveVietnamese(state.grid, centralEle),
+        };
+      }
+    }
+    if (forwardMatches.length > 1) {
+      return {
+        move: null,
+        ambiguous: true,
+        candidates: forwardMatches.slice(0, 3),
+        error: `Quân ở lộ ${file} đi được nhiều ô (${forwardMatches
+          .slice(0, 2)
+          .map((m) => formatMoveVietnamese(state.grid, m))
+          .join(' hay ')}), nói rõ số bước nhé!`,
+      };
+    }
+  }
+
+  // Pattern 2C: Direct capture command ("xe ăn pháo", "pháo đập mã", "mã ăn tốt", "ăn xe")
+  const capturePairRe =
+    /\b(tuong|soai|tinh|voi|si|sy|ma|ngua|xe|xa|phao|tot|binh|chot)\s*(?:([1-9])\s*)?(an|dap|chem|bat|xoi|hit)\s+(?:con\s+)?(tuong|soai|tinh|voi|si|sy|ma|ngua|xe|xa|phao|tot|binh|chot)\b/;
+  const capMatch = norm.match(capturePairRe);
+  if (capMatch) {
+    const [, attRaw, attFileRaw, , vicRaw] = capMatch;
+    const attTypes = getCandidatePieceTypes(attRaw);
+    const vicTypes = getCandidatePieceTypes(vicRaw);
+    const attCol = attFileRaw ? fileToCol(Number(attFileRaw), side) : null;
+
+    const capMatches = legalMoves.filter(
+      (mv) =>
+        mv.captured &&
+        attTypes.includes(mv.piece.type) &&
+        vicTypes.includes(mv.captured.type) &&
+        (attCol === null || mv.from.col === attCol),
+    );
+    if (capMatches.length === 1) {
+      return {
+        move: capMatches[0],
+        notation: formatMoveVietnamese(state.grid, capMatches[0]),
+      };
+    }
+    if (capMatches.length > 1) {
+      return {
+        move: null,
+        ambiguous: true,
+        candidates: capMatches.slice(0, 3),
+        error: `Có ${capMatches.length} cách ăn quân (${capMatches
+          .slice(0, 2)
+          .map((m) => formatMoveVietnamese(state.grid, m))
+          .join(' hoặc ')}), chọn rõ lộ nhé!`,
+      };
+    }
+    return {
+      move: null,
+      error: `Chưa có nước ăn hợp lệ "${rawInput.trim()}" ở thế cờ hiện tại.`,
+    };
+  }
+
+  // Short capture ("ăn xe", "ăn pháo", "ăn mã")
+  const shortCapRe = /^(an|dap|chem|xoi)\s+(?:con\s+)?(tuong|tinh|voi|si|sy|ma|ngua|xe|xa|phao|tot|binh|chot)$/;
+  const shortCapMatch = norm.match(shortCapRe);
+  if (shortCapMatch) {
+    const vicTypes = getCandidatePieceTypes(shortCapMatch[2]);
+    const capMatches = legalMoves.filter(
+      (mv) => mv.captured && vicTypes.includes(mv.captured.type),
+    );
+    if (capMatches.length === 1) {
+      return {
+        move: capMatches[0],
+        notation: formatMoveVietnamese(state.grid, capMatches[0]),
+      };
+    }
+    if (capMatches.length > 1) {
+      return {
+        move: null,
+        ambiguous: true,
+        candidates: capMatches.slice(0, 3),
+        error: `Có ${capMatches.length} quân ăn được (${capMatches
+          .slice(0, 2)
+          .map((m) => formatMoveVietnamese(state.grid, m))
+          .join(' hay ')}), nói rõ quân nào nhé!`,
+      };
+    }
+  }
+
+  // Direct "chiếu tướng" if there is a unique checking move!
+  if (/^(chieu|chieu tuong)$/.test(norm)) {
+    const opp: Side = side === 'red' ? 'black' : 'red';
+    const checkMoves = legalMoves.filter((mv) => {
+      const next = applyMoveOnGrid(state.grid, mv);
+      return isInCheck(next, opp);
+    });
+    if (checkMoves.length === 1) {
+      return {
+        move: checkMoves[0],
+        notation: formatMoveVietnamese(state.grid, checkMoves[0]),
+      };
+    }
+    if (checkMoves.length > 1) {
+      return {
+        move: null,
+        ambiguous: true,
+        candidates: checkMoves.slice(0, 3),
+        error: `Có tới ${checkMoves.length} đòn chiếu (${checkMoves
+          .slice(0, 2)
+          .map((m) => formatMoveVietnamese(state.grid, m))
+          .join(' hoặc ')}), chọn đòn nào chàng ơi?`,
+      };
+    }
+  }
+
+  // Pattern 2D: Piece + Action + Target without file ("xe tiến 2", "mã lên 7", "pháo bình 5")
+  const pieceActRe =
+    /\b(tuong|soai|tinh|voi|si|sy|ma|ngua|xe|xa|phao|tot|binh|chot)\s+(tien|tan|len|day|thoai|lui|ve|rut|binh|ngang|vo|vao|sang|qua|ra)\s*([1-9])\b/;
+  const paMatch = norm.match(pieceActRe);
+  if (paMatch) {
+    const [, pieceRaw, actRaw, valRaw] = paMatch;
+    const candidateTypes = getCandidatePieceTypes(pieceRaw);
+    const dir = parseActionToken(actRaw);
+    const val = Number(valRaw);
+    if (candidateTypes.length > 0 && dir) {
+      const matches = legalMoves.filter(
+        (mv) =>
+          candidateTypes.includes(mv.piece.type) &&
+          matchesMoveDirectionAndValue(mv, side, dir, val),
+      );
+      if (matches.length === 1) {
+        return {
+          move: matches[0],
+          notation: formatMoveVietnamese(state.grid, matches[0]),
+        };
+      }
+      if (matches.length > 1) {
+        if (preferredPieceId) {
+          const pref = matches.filter((m) => m.piece.id === preferredPieceId);
+          if (pref.length === 1) {
+            return {
+              move: pref[0],
+              notation: formatMoveVietnamese(state.grid, pref[0]),
+            };
+          }
+        }
+        return {
+          move: null,
+          ambiguous: true,
+          candidates: matches.slice(0, 3),
+          error: `Có ${matches.length} quân ${PIECE_NAME_VI[side][matches[0].piece.type]} đều đi được (${matches
+            .slice(0, 2)
+            .map((m) => formatMoveVietnamese(state.grid, m))
+            .join(' hoặc ')}), nói rõ cột giúp thiếp nhé!`,
+        };
+      }
+    }
+  }
+
   // Pattern 3: Shorthand contextual move directly matching prompt: "tiến 5", "thoái 1", "bình 3"
-  const shortRe = /^(tien|tan|len|thoai|lui|ve|binh|ngang)\s*([1-9])$/;
+  const shortRe = /^(tien|tan|len|thoai|lui|ve|binh|ngang|vo|vao|sang|qua)\s*([1-9])$/;
   const shortMatch = norm.match(shortRe);
   if (shortMatch) {
     const [, actRaw, valRaw] = shortMatch;
@@ -321,19 +692,41 @@ export function parseVietnameseChatMove(
     }
   }
 
+  // Detect natural-language move intent that warrants server-side Gemini NLU fallback
+  const hasNaturalPiece =
+    /\b(xe|xa|phao|ma|ngua|tot|chot|tuong|voi|tinh|si|soai)\b/.test(norm);
+  const hasNaturalMotion =
+    /\b(di|day|len|xuong|qua|sang|ve|lui|rut|keo|an|dap|chem|chieu|chay|nhay|phi|giu|chan|mo|trai|phai|giua|bien|goc|song)\b/.test(
+      norm,
+    );
+  if (hasNaturalPiece && hasNaturalMotion && norm.length <= 95) {
+    return { move: null, needsAiFallback: true };
+  }
+
   return { move: null };
 }
 
 export interface ChatCommandIntent {
-  type: 'challenge' | 'guest_profile' | 'move_candidate' | 'chat';
+  type:
+    | 'challenge'
+    | 'guest_profile'
+    | 'ready_check'
+    | 'resign'
+    | 'draw_offer'
+    | 'undo_request'
+    | 'hint_request'
+    | 'move_candidate'
+    | 'chat';
   gender?: 'nam' | 'nu';
   age?: number;
 }
 
 export function classifyChatMessage(raw: string): ChatCommandIntent {
-  const norm = normalizeVietnamese(raw);
+  const norm = normalizeSpokenMoveNumbers(raw);
   if (
-    /^(!choi|!thachdau|!dau|!lendai|xin danh|len dai|choi voi bot|thach dau)/.test(norm)
+    /^(!choi|!thachdau|!dau|!lendai|xin danh|len dai|choi voi bot|thach dau|dang ky choi)/.test(
+      norm,
+    )
   ) {
     return { type: 'challenge' };
   }
@@ -345,9 +738,36 @@ export function classifyChatMessage(raw: string): ChatCommandIntent {
     return { type: 'guest_profile', gender, age };
   }
 
+  if (/^(!xinthua|!thua|xin thua|nhan thua|chiu thua|dau hang)\b/.test(norm)) {
+    return { type: 'resign' };
+  }
+
+  if (/^(!hoaco|!hoa|xin hoa|cau hoa|danh hoa)\b/.test(norm)) {
+    return { type: 'draw_offer' };
+  }
+
+  if (/^(!dilai|!hoanuoc|xin di lai|cho di lai|di lai di)\b/.test(norm)) {
+    return { type: 'undo_request' };
+  }
+
+  if (/^(!goiy|!hint|xin goi y|goi y giup|mach nuoc)\b/.test(norm)) {
+    return { type: 'hint_request' };
+  }
+
+  if (/^(!sansang|san sang|co mat|ok em|ok thi?ep|bat dau|len luon|chot keo)$/.test(norm)) {
+    return { type: 'ready_check' };
+  }
+
   if (
-    /\b(tien|tan|len|thoai|lui|ve|binh|ngang)\s*[1-9]\b/.test(norm) ||
-    /\b[xpmbst]\s*[1-9]\s*[.+\-=]\s*[1-9]\b/.test(norm)
+    /\b(tien|tan|len|thoai|lui|ve|binh|ngang|vo|vao|sang|qua|ra)\s*[1-9]\b/.test(norm) ||
+    /\b(tg|[xpmbst])\s*[1-9]\s*(?:[.+\-=/tb]|th)\s*[1-9]\b/.test(norm) ||
+    /\b(tg|[xpmbst])[1-9]{2}\b/.test(norm) ||
+    /\bphao dau\b/.test(norm) ||
+    /\b(xe|phao|ma|tot|chot|tuong|si)\s*(an|dap|chem|bat|xoi)\s+(xe|phao|ma|tot|chot|tuong|si)\b/.test(
+      norm,
+    ) ||
+    /^(an|dap|chem)\s+(xe|phao|ma|tot|chot|tuong|si)$/.test(norm) ||
+    /^(chieu|chieu tuong)$/.test(norm)
   ) {
     return { type: 'move_candidate' };
   }

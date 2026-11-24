@@ -9,12 +9,16 @@ import {
   Coord,
   Move,
   PIECE_NAME_VI,
+  applyMoveOnGrid,
   createInitialBoard,
+  generateLegalMoves,
   generateLegalMovesForSquare,
+  isInCheck,
   makeMove,
 } from './engine/xiangqi';
 import {
   classifyChatMessage,
+  colToFile,
   formatMoveVietnamese,
   parseVietnameseChatMove,
 } from './engine/notation';
@@ -24,6 +28,7 @@ import {
   analyzePosition,
   detectMoveMotif,
 } from './engine/ai';
+import { xiangqiAiClient } from './engine/aiClient';
 import {
   BOT_MASTER_PROFILE,
   GuestGender,
@@ -39,10 +44,8 @@ import {
   buildInstantWuxiaCommentary,
   createChallenger,
   emotionToMood,
-  enqueueChallenger,
   pickNextChallenger,
 } from './engine/matchmaker';
-import { actorIdFor, isLocalActor } from './engine/liveIdentity';
 import {
   MATCH_PHASE_LABELS_VI,
   PerformanceGesture,
@@ -52,7 +55,27 @@ import {
   countBoardPieces,
   detectMatchPhase,
 } from './engine/livePerformance';
+import {
+  CrowdVoteState,
+  LiveControlMode,
+  applySeatLockedProfileUpdate,
+  buildLiveInteractionScript,
+  createEmptyCrowdVote,
+  enqueueChallengerWithPriority,
+  evaluateTurnClockTransition,
+  recordCrowdVote,
+  tallyCrowdVotes,
+  triageLiveComment,
+} from './engine/liveInteraction';
 import { CameraPreset, XiangqiStage, ZoomFocus } from './scene/XiangqiStage';
+import {
+  DEFAULT_PIECE_STYLE,
+  PieceLabelMode,
+  PieceThemeId,
+  PieceVisualConfig,
+  nextPieceLabelMode,
+  nextPieceTheme,
+} from './scene/pieceStyle';
 import { CharacterMood } from './scene/characters3d';
 import { BoardFocusSignal, HostEmotion } from './scene/portraitKinematics';
 import {
@@ -61,6 +84,7 @@ import {
   MoveChoreoPayload,
 } from './scene/cinemaDirector';
 import { CommentaryVoiceName, wuxiaAudio } from './utils/wuxiaAudio';
+import { voiceMoveListener } from './utils/voiceMoveListener';
 import { TitleOverlay } from './components/TitleOverlay';
 import { TopBroadcastBar } from './components/TopBroadcastBar';
 import { CommentaryBanner } from './components/CommentaryBanner';
@@ -81,23 +105,45 @@ function checkInitialTikTok(): boolean {
   return new URLSearchParams(window.location.search).get('tiktok') === '1';
 }
 
-// Seats driven from this browser (Studio panel, quick match, seeded demo
-// players) speak as `local:` actors. A relay viewer who claims the same handle
-// gets `actor:@kiemkhach_vn` from the server, which never matches.
-const localSeat = (handle: string) => actorIdFor('local', handle);
+const PIECE_STYLE_STORAGE_KEY = 'ky_dai_piece_style_v1';
+const VALID_PIECE_THEMES = new Set<PieceThemeId>([
+  'ivory_crimson',
+  'classic_red_white',
+  'tournament_white',
+]);
+const VALID_LABEL_MODES = new Set<PieceLabelMode>(['han', 'han_viet', 'viet']);
+
+function loadSavedPieceStyle(): PieceVisualConfig {
+  if (typeof window === 'undefined') return DEFAULT_PIECE_STYLE;
+  try {
+    const raw = window.localStorage.getItem(PIECE_STYLE_STORAGE_KEY);
+    if (!raw) return DEFAULT_PIECE_STYLE;
+    const parsed = JSON.parse(raw) as Partial<PieceVisualConfig>;
+    const theme =
+      parsed.theme && VALID_PIECE_THEMES.has(parsed.theme)
+        ? parsed.theme
+        : DEFAULT_PIECE_STYLE.theme;
+    const labelMode =
+      parsed.labelMode && VALID_LABEL_MODES.has(parsed.labelMode)
+        ? parsed.labelMode
+        : DEFAULT_PIECE_STYLE.labelMode;
+    return { theme, labelMode };
+  } catch {
+    return DEFAULT_PIECE_STYLE;
+  }
+}
 
 const INITIAL_CHALLENGER: ChallengerEntry = createChallenger(
   '@KiemKhach_VN',
-  localSeat('@KiemKhach_VN'),
   'nam',
   26,
   matchGuestCharacter('nam', 26),
 );
 
 const INITIAL_QUEUE: ChallengerEntry[] = [
-  createChallenger('@TieuYenNhi_99', localSeat('@TieuYenNhi_99'), 'nu', 24),
-  createChallenger('@LaoGiaCoTuong', localSeat('@LaoGiaCoTuong'), 'nam', 64),
-  createChallenger('@MinhNguyet_88', localSeat('@MinhNguyet_88'), 'nu', 34),
+  createChallenger('@TieuYenNhi_99', 'nu', 24),
+  createChallenger('@LaoGiaCoTuong', 'nam', 64),
+  createChallenger('@MinhNguyet_88', 'nu', 34),
 ];
 
 export default function App() {
@@ -121,7 +167,7 @@ export default function App() {
     {
       id: 'init_1',
       username: BOT_MASTER_PROFILE.name,
-      text: 'Đêm tân hôn nến đỏ khai cuộc! Chàng thắng thiếp thì thiếp giao lại một lớp hồi môn, thua thì ôm gối ngắm trăng nha! Chat "!choi" để lên đài hoặc gửi nước đi như "p2 bình 5", "m8 tiến 7", "x7 bình 3".',
+      text: 'Đêm tân hôn nến đỏ khai cuộc! Chàng thắng thiếp thì thiếp nghe lời răm rắp, thua thì ôm gối ngắm trăng nha! Chat "!choi" để lên đài hoặc gửi nước đi như "p2 bình 5", "m8 tiến 7", "x7 bình 3".',
       timestamp: Date.now() - 4000,
       kind: 'bot',
     },
@@ -140,7 +186,7 @@ export default function App() {
     actor: BOT_MASTER_PROFILE.name,
     notation: 'Khai Cuộc',
     motif: 'Hoa Chúc Khai Đài',
-    line: 'Chào hai họ phòng live! Trước giờ động phòng hoa chúc... chàng đánh với thiếp một ván nhé — thắng thì thiếp giao lại một lớp hồi môn trước bàn dân thiên hạ, còn thua thì ra hành lang ngắm trăng nha!',
+    line: 'Chào hai họ phòng live! Trước giờ động phòng hoa chúc... chàng đánh với thiếp một ván nhé — thắng thì thiếp nghe lời chàng răm rắp, còn thua thì ra hành lang ngắm trăng nha!',
     mood: 'calm',
     emotion: 'amused',
     emotionLabel: EMOTION_LABELS_VI.amused,
@@ -150,7 +196,9 @@ export default function App() {
     source: 'engine',
   });
 
-  const [dockCollapsed, setDockCollapsed] = useState(false);
+  const [dockCollapsed, setDockCollapsed] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.innerWidth < 768 : false,
+  );
   const [activeTab, setActiveTab] = useState<DockTab>('chat');
   const [cameraPreset, setCameraPreset] = useState<CameraPreset>('liveBot');
   const [splitScreen, setSplitScreen] = useState(true);
@@ -165,6 +213,24 @@ export default function App() {
   const [speakingEngine, setSpeakingEngine] = useState<'gemini' | 'browser' | null>(null);
   const [tiktokFrame, setTiktokFrame] = useState<boolean>(() => checkInitialTikTok());
   const [audienceWaveOn, setAudienceWaveOn] = useState(true);
+  const [autoCommentReply, setAutoCommentReply] = useState(true);
+  const [liveMode, setLiveMode] = useState<LiveControlMode>('duel_1v1');
+  const [awaitingReadyCheck, setAwaitingReadyCheck] = useState(false);
+  const [afkStrikes, setAfkStrikes] = useState(0);
+  const [crowdVote, setCrowdVote] = useState<CrowdVoteState>(() => createEmptyCrowdVote());
+  const [voiceListening, setVoiceListening] = useState(false);
+  const [voiceInterimText, setVoiceInterimText] = useState('');
+  const [pendingVoiceMove, setPendingVoiceMove] = useState<{
+    move: Move;
+    notation: string;
+    transcript: string;
+  } | null>(null);
+  const [spotlightComment, setSpotlightComment] = useState<{
+    username: string;
+    text: string;
+    score: number;
+    receivedAt: number;
+  } | null>(null);
   const [botThinking, setBotThinking] = useState(false);
   const [turnSecondsLeft, setTurnSecondsLeft] = useState(45);
   const [viewerCount, setViewerCount] = useState(1284);
@@ -177,6 +243,10 @@ export default function App() {
   const [boardFocus, setBoardFocus] = useState<BoardFocusSignal | null>(null);
   const [hostEmotion, setHostEmotion] = useState<HostEmotion>('amused');
   const [cinemaAngle, setCinemaAngle] = useState<CinemaCameraAngle>('auto');
+  const [pieceStyle, setPieceStyle] = useState<PieceVisualConfig>(() =>
+    loadSavedPieceStyle(),
+  );
+  const pieceStyleRef = useRef(pieceStyle);
   const [moveEvent, setMoveEvent] = useState<MoveChoreoPayload | null>(null);
   const [actionCue, setActionCue] = useState<ActionCuePayload | null>(null);
   const focusSeqRef = useRef(0);
@@ -190,12 +260,22 @@ export default function App() {
   const nudgedTurnKeyRef = useRef<string>('');
   const countdownTurnKeyRef = useRef<string>('');
   const gestureChoreoTimerRef = useRef<number | null>(null);
+  const lastViewerReplyAtRef = useRef<number>(0);
+  const lastIllegalSpokenAtRef = useRef<number>(0);
+  const voiceConfirmTimerRef = useRef<number | null>(null);
 
   // Refs synced to latest state so Three.js callbacks & SSE listeners never go stale
   const boardRef = useRef(board);
   const analysisRef = useRef(analysis);
   const appStateRef = useRef(appState);
   const activeChallengerRef = useRef(activeChallenger);
+  const queueRef = useRef(queue);
+  const liveModeRef = useRef(liveMode);
+  const autoCommentReplyRef = useRef(autoCommentReply);
+  const awaitingReadyCheckRef = useRef(awaitingReadyCheck);
+  const afkStrikesRef = useRef(afkStrikes);
+  const crowdVoteRef = useRef(crowdVote);
+  const speakingEngineRef = useRef(speakingEngine);
   const difficultyRef = useRef(difficulty);
   const selectedSquareRef = useRef(selectedSquare);
   const preferredPieceIdRef = useRef(preferredPieceId);
@@ -203,6 +283,30 @@ export default function App() {
   const botTimerRef = useRef<number | null>(null);
   const speakTimerRef = useRef<number | null>(null);
   const speakUiSeqRef = useRef<number>(0);
+
+  useEffect(() => {
+    queueRef.current = queue;
+  }, [queue]);
+  useEffect(() => {
+    liveModeRef.current = liveMode;
+  }, [liveMode]);
+  useEffect(() => {
+    autoCommentReplyRef.current = autoCommentReply;
+  }, [autoCommentReply]);
+  useEffect(() => {
+    awaitingReadyCheckRef.current = awaitingReadyCheck;
+  }, [awaitingReadyCheck]);
+  useEffect(() => {
+    afkStrikesRef.current = afkStrikes;
+  }, [afkStrikes]);
+  useEffect(() => {
+    crowdVoteRef.current = crowdVote;
+  }, [crowdVote]);
+  useEffect(() => {
+    speakingEngineRef.current = speakingEngine;
+    // Echo-Guard: suppress Voice Move Listener whenever Kỳ Ma is speaking or thinking!
+    voiceMoveListener.setSuppressed(speakingEngine !== null || botThinkingRef.current);
+  }, [speakingEngine, botThinking]);
 
   useEffect(() => {
     boardRef.current = board;
@@ -308,7 +412,7 @@ export default function App() {
   );
 
   const recordRecentLine = useCallback((line: string) => {
-    recentLinesRef.current = [...recentLinesRef.current.slice(-14), line];
+    recentLinesRef.current = [...recentLinesRef.current.slice(-9), line];
   }, []);
 
   const dispatchGestureCue = useCallback(
@@ -529,28 +633,10 @@ export default function App() {
 
       const prevScore = prevScoreRef.current;
       const prevWinProbRed = prevWinProbRedRef.current;
-      const nextAnalysis =
-        precomputed?.nextAnalysis ??
-        analyzePosition(nextBoard, difficultyRef.current, {
-          mode: nextBoard.turn === 'black' ? 'play' : 'preview',
-          recentPositionKeys: recentPosKeysRef.current,
-        });
-      if (nextAnalysis.positionKey) {
-        recentPosKeysRef.current = [
-          ...recentPosKeysRef.current.slice(-15),
-          nextAnalysis.positionKey,
-        ];
-      }
-      const scoreDeltaForRed =
-        precomputed?.scoreDeltaForRed ?? nextAnalysis.score - prevScore;
-      prevScoreRef.current = nextAnalysis.score;
-      prevWinProbRedRef.current = nextAnalysis.winProbRed;
-      setAnalysis(nextAnalysis);
 
-      // Update 3D stage immediately
+      // Update 3D stage IMMEDIATELY at 60fps before running any heavy AI search!
       stageRef.current?.syncBoard(nextBoard, move, true);
       stageRef.current?.setSelectionOverlay(null, []);
-      stageRef.current?.updateAnalysisVisuals(nextBoard, nextAnalysis, showAnalysis, null);
 
       // Direct Virtual Host eye-gaze & head turn smoothly toward exact landing square!
       setBoardFocus({
@@ -584,6 +670,24 @@ export default function App() {
 
       // Case 1: Match Ended (Checkmate / Stalemate) — deliver emotional finale immediately
       if (nextBoard.status !== 'playing') {
+        const terminalAnalysis =
+          precomputed?.nextAnalysis ??
+          analyzePosition(nextBoard, difficultyRef.current, {
+            mode: 'preview',
+            recentPositionKeys: recentPosKeysRef.current,
+          });
+        const scoreDeltaForRed =
+          precomputed?.scoreDeltaForRed ?? terminalAnalysis.score - prevScore;
+        prevScoreRef.current = terminalAnalysis.score;
+        prevWinProbRedRef.current = terminalAnalysis.winProbRed;
+        setAnalysis(terminalAnalysis);
+        stageRef.current?.updateAnalysisVisuals(
+          nextBoard,
+          terminalAnalysis,
+          showAnalysis,
+          null,
+        );
+
         setBotThinking(false);
         const guest = activeChallengerRef.current;
         const fallbackEnd = buildInstantWuxiaCommentary({
@@ -592,7 +696,7 @@ export default function App() {
           notation,
           actorName,
           playedMotif,
-          analysis: nextAnalysis,
+          analysis: terminalAnalysis,
           challengerName: guest.username,
           guestGender: guest.gender,
           guestAge: guest.age,
@@ -614,79 +718,156 @@ export default function App() {
         return;
       }
 
-      // Case 2: Red (Challenger) just moved -> React visually right away, compute Bot reply,
-      // and call Gemini AI commentary in PARALLEL during Bot's natural think beat so speech NEVER cuts off!
+      // Case 2: Red (Challenger) just moved -> Run deep Grandmaster AI search OFF THE MAIN THREAD
+      // inside a Web Worker while 3D WebGL & Pavilion animations glide smoothly at 60fps!
       if (nextBoard.turn === 'black') {
         const myTurnToken = ++turnSeqRef.current;
-        const redReaction: HostEmotion = nextBoard.inCheck
+        const thinkStartMs = Date.now();
+        const initialReaction: HostEmotion = nextBoard.inCheck
           ? 'check'
-          : move.captured || scoreDeltaForRed >= 80
+          : move.captured
             ? 'surprised'
-            : scoreDeltaForRed <= -110
-              ? 'amused'
-              : 'thinking';
-        setHostEmotion(redReaction);
+            : 'thinking';
+        setHostEmotion(initialReaction);
         setBotThinking(true);
         stageRef.current?.setBotState('thinking', false);
         if (botTimerRef.current) window.clearTimeout(botTimerRef.current);
 
-        // Reuse the full-depth Grandmaster Bot decision already computed for nextBoard!
-        const plannedBotMove = nextAnalysis.bestMove;
+        void (async () => {
+          const botSearch =
+            precomputed?.nextAnalysis ??
+            (await xiangqiAiClient.analyzeAsync(nextBoard, difficultyRef.current, {
+              mode: 'play',
+              recentPositionKeys: recentPosKeysRef.current,
+            }));
 
-        let parallelGeminiPromise: Promise<CommentaryItem | null> | undefined;
-        let boardAfterBotAnalysis: DeepAnalysisResult | undefined;
-
-        if (plannedBotMove) {
-          const botNotation = formatMoveVietnamese(nextBoard.grid, plannedBotMove);
-          const simulatedAfterBot = makeMove(nextBoard, plannedBotMove);
-          boardAfterBotAnalysis = analyzePosition(simulatedAfterBot, difficultyRef.current, {
-            mode: 'preview',
-            recentPositionKeys: recentPosKeysRef.current,
-          });
-          parallelGeminiPromise = requestEmotionalGeminiCommentary({
-            notation: botNotation,
-            playerMoveNotation: notation,
-            botMoveNotation: botNotation,
-            actorName: BOT_MASTER_PROFILE.name,
-            side: 'black',
-            nextBoard: simulatedAfterBot,
-            move: plannedBotMove,
-            nextAnalysis: boardAfterBotAnalysis,
-            scoreDeltaForRed,
-            prevWinProbRed,
-            playerCaptured: move.captured
-              ? PIECE_NAME_VI[move.captured.side][move.captured.type]
-              : undefined,
-            botCaptured: plannedBotMove.captured
-              ? PIECE_NAME_VI[plannedBotMove.captured.side][plannedBotMove.captured.type]
-              : undefined,
-          });
-        }
-
-        botTimerRef.current = window.setTimeout(() => {
-          if (appStateRef.current !== 'playing' || turnSeqRef.current !== myTurnToken) {
+          if (
+            appStateRef.current !== 'playing' ||
+            turnSeqRef.current !== myTurnToken ||
+            boardRef.current.turn !== 'black' ||
+            boardRef.current.status !== 'playing'
+          ) {
             setBotThinking(false);
             return;
           }
-          const liveBoard = boardRef.current;
-          if (liveBoard.turn !== 'black' || liveBoard.status !== 'playing') {
-            setBotThinking(false);
-            return;
+
+          if (botSearch.positionKey) {
+            recentPosKeysRef.current = [
+              ...recentPosKeysRef.current.slice(-15),
+              botSearch.positionKey,
+            ];
           }
-          setBotThinking(false);
+          const scoreDeltaForRed =
+            precomputed?.scoreDeltaForRed ?? botSearch.score - prevScore;
+          prevScoreRef.current = botSearch.score;
+          prevWinProbRedRef.current = botSearch.winProbRed;
+          setAnalysis(botSearch);
+          stageRef.current?.updateAnalysisVisuals(
+            nextBoard,
+            botSearch,
+            showAnalysis,
+            null,
+          );
+
+          const refinedReaction: HostEmotion = nextBoard.inCheck
+            ? 'check'
+            : move.captured || scoreDeltaForRed >= 80
+              ? 'surprised'
+              : scoreDeltaForRed <= -110
+                ? 'amused'
+                : 'thinking';
+          setHostEmotion(refinedReaction);
+
+          const plannedBotMove = botSearch.bestMove;
+          let parallelGeminiPromise: Promise<CommentaryItem | null> | undefined;
+          let boardAfterBotAnalysis: DeepAnalysisResult | undefined;
+
           if (plannedBotMove) {
-            commitMove(plannedBotMove, BOT_MASTER_PROFILE.name, 'black', {
+            const botNotation = formatMoveVietnamese(nextBoard.grid, plannedBotMove);
+            const simulatedAfterBot = makeMove(nextBoard, plannedBotMove);
+            boardAfterBotAnalysis = await xiangqiAiClient.analyzeAsync(
+              simulatedAfterBot,
+              difficultyRef.current,
+              {
+                mode: 'preview',
+                recentPositionKeys: recentPosKeysRef.current,
+              },
+            );
+
+            if (
+              appStateRef.current !== 'playing' ||
+              turnSeqRef.current !== myTurnToken ||
+              boardRef.current.turn !== 'black'
+            ) {
+              setBotThinking(false);
+              return;
+            }
+
+            parallelGeminiPromise = requestEmotionalGeminiCommentary({
+              notation: botNotation,
+              playerMoveNotation: notation,
+              botMoveNotation: botNotation,
+              actorName: BOT_MASTER_PROFILE.name,
+              side: 'black',
+              nextBoard: simulatedAfterBot,
+              move: plannedBotMove,
               nextAnalysis: boardAfterBotAnalysis,
-              geminiPromise: parallelGeminiPromise,
               scoreDeltaForRed,
-              turnToken: myTurnToken,
+              prevWinProbRed,
+              playerCaptured: move.captured
+                ? PIECE_NAME_VI[move.captured.side][move.captured.type]
+                : undefined,
+              botCaptured: plannedBotMove.captured
+                ? PIECE_NAME_VI[plannedBotMove.captured.side][plannedBotMove.captured.type]
+                : undefined,
             });
           }
-        }, 820);
+
+          const remainingThinkMs = Math.max(120, 760 - (Date.now() - thinkStartMs));
+          botTimerRef.current = window.setTimeout(() => {
+            if (appStateRef.current !== 'playing' || turnSeqRef.current !== myTurnToken) {
+              setBotThinking(false);
+              return;
+            }
+            const liveBoard = boardRef.current;
+            if (liveBoard.turn !== 'black' || liveBoard.status !== 'playing') {
+              setBotThinking(false);
+              return;
+            }
+            setBotThinking(false);
+            if (plannedBotMove) {
+              commitMove(plannedBotMove, BOT_MASTER_PROFILE.name, 'black', {
+                nextAnalysis: boardAfterBotAnalysis,
+                geminiPromise: parallelGeminiPromise,
+                scoreDeltaForRed,
+                turnToken: myTurnToken,
+              });
+            }
+          }, remainingThinkMs);
+        })();
         return;
       }
 
-      // Case 3: Black (Kỳ Ma) just landed her reply -> Deliver ONE complete, deeply emotional choreographed line!
+      // Case 3: Black (Kỳ Ma) just landed her reply -> Apply precomputed preview analysis & deliver emotional commentary!
+      const nextAnalysis =
+        precomputed?.nextAnalysis ??
+        analyzePosition(nextBoard, difficultyRef.current, {
+          mode: 'preview',
+          recentPositionKeys: recentPosKeysRef.current,
+        });
+      if (nextAnalysis.positionKey) {
+        recentPosKeysRef.current = [
+          ...recentPosKeysRef.current.slice(-15),
+          nextAnalysis.positionKey,
+        ];
+      }
+      const scoreDeltaForRed =
+        precomputed?.scoreDeltaForRed ?? nextAnalysis.score - prevScore;
+      prevScoreRef.current = nextAnalysis.score;
+      prevWinProbRedRef.current = nextAnalysis.winProbRed;
+      setAnalysis(nextAnalysis);
+      stageRef.current?.updateAnalysisVisuals(nextBoard, nextAnalysis, showAnalysis, null);
+
       const guest = activeChallengerRef.current;
       const fallbackCmt = buildInstantWuxiaCommentary({
         boardAfter: nextBoard,
@@ -744,37 +925,183 @@ export default function App() {
     ],
   );
 
-  // Process any incoming chat message (local form, simulated TikTok viewer, or real SSE webhook!)
+  // Respond aloud & with synced gesture to a live viewer comment, backseat coach, or challenger banter
+  const respondToLiveChat = useCallback(
+    async (
+      kind: 'backseat_coach' | 'viewer_spotlight' | 'challenger_banter',
+      speakerName: string,
+      messageText: string,
+      suggestedNotation?: string,
+    ) => {
+      const guest = activeChallengerRef.current;
+      const fallbackScript = buildLiveInteractionScript({
+        kind,
+        challengerName: guest.username,
+        guestGender: guest.gender,
+        guestAge: guest.age,
+        viewerName: speakerName,
+        viewerText: messageText,
+        suggestedNotation,
+        recentLines: recentLinesRef.current,
+      });
+
+      const notationTag =
+        kind === 'backseat_coach'
+          ? `Bắt Bài ${speakerName}`
+          : kind === 'challenger_banter'
+            ? `Đáp Lời ${speakerName}`
+            : `Giao Lưu ${speakerName}`;
+
+      // Try server-side Gemini live reply first (fast low-latency), fall back cleanly to instant script
+      try {
+        const resp = await fetch('/api/live-reply', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            kind,
+            speakerName,
+            messageText,
+            challengerName: guest.username,
+            guestGender: guest.gender,
+            guestAge: guest.age,
+            suggestedNotation,
+            winProbRed: analysisRef.current.winProbRed,
+          }),
+        });
+        const data = await resp.json();
+        if (resp.ok && data.ok && data.line) {
+          performScriptBeat(
+            {
+              ...fallbackScript,
+              line: data.line,
+              emotion: (data.emotion as HostEmotion) ?? fallbackScript.emotion,
+              gesture: (data.gesture as PerformanceGesture) ?? fallbackScript.gesture,
+              stageDirection: data.stageDirection ?? fallbackScript.stageDirection,
+            },
+            { notation: notationTag, source: 'gemini' },
+          );
+          return;
+        }
+      } catch {
+        // silent fallback to expressive instant script
+      }
+
+      performScriptBeat(fallbackScript, { notation: notationTag, source: 'engine' });
+    },
+    [performScriptBeat],
+  );
+
+  // Hybrid Gemini NLU Fallback: resolves complex natural-language moves ("đẩy tốt giữa lên", "lấy xe bên phải chiếu")
+  const resolveMoveWithGeminiNlu = useCallback(
+    async (username: string, rawText: string, snapshotBoard: BoardState) => {
+      const legal = generateLegalMoves(snapshotBoard.grid, 'red');
+      if (legal.length === 0) return;
+
+      const payloadMoves = legal.map((mv, index) => {
+        const afterGrid = applyMoveOnGrid(snapshotBoard.grid, mv);
+        return {
+          index,
+          notation: formatMoveVietnamese(snapshotBoard.grid, mv),
+          pieceVi: PIECE_NAME_VI.red[mv.piece.type],
+          fromFile: colToFile(mv.from.col, 'red'),
+          toFile: colToFile(mv.to.col, 'red'),
+          capturedVi: mv.captured ? PIECE_NAME_VI.black[mv.captured.type] : undefined,
+          givesCheck: isInCheck(afterGrid, 'black'),
+        };
+      });
+
+      try {
+        const resp = await fetch('/api/parse-move', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: rawText, legalMoves: payloadMoves }),
+        });
+        const data = await resp.json();
+        // Ensure board hasn't already advanced while awaiting NLU
+        if (
+          boardRef.current.moveCount !== snapshotBoard.moveCount ||
+          boardRef.current.turn !== 'red' ||
+          botThinkingRef.current
+        ) {
+          return;
+        }
+        if (resp.ok && data.ok && typeof data.moveIndex === 'number' && legal[data.moveIndex]) {
+          commitMove(legal[data.moveIndex], username, 'red');
+          return;
+        }
+        if (
+          resp.ok &&
+          data.ok &&
+          Array.isArray(data.ambiguousIndices) &&
+          data.ambiguousIndices.length > 1
+        ) {
+          const cands = data.ambiguousIndices
+            .map((idx: number) => legal[idx])
+            .filter(Boolean) as Move[];
+          if (cands.length > 0) {
+            stageRef.current?.setSelectionOverlay(
+              cands[0].from,
+              cands.map((c) => c.to),
+            );
+            const guest = activeChallengerRef.current;
+            const script = buildLiveInteractionScript({
+              kind: 'move_ambiguous',
+              challengerName: guest.username,
+              guestGender: guest.gender,
+              guestAge: guest.age,
+              candidateNotations: cands.map((c) =>
+                formatMoveVietnamese(snapshotBoard.grid, c),
+              ),
+              recentLines: recentLinesRef.current,
+            });
+            performScriptBeat(script, { notation: 'Hỏi Lại Nước Đi' });
+            return;
+          }
+        }
+      } catch {
+        // Fallback silently to casual challenger banter
+      }
+
+      if (autoCommentReplyRef.current && speakingEngineRef.current === null) {
+        void respondToLiveChat('challenger_banter', username, rawText);
+      }
+    },
+    [commitMove, performScriptBeat, respondToLiveChat],
+  );
+
+  // Process any incoming chat message (local form, simulated TikTok viewer, Voice Mic, or real SSE webhook!)
   const processIncomingChat = useCallback(
     (
       username: string,
       text: string,
-      meta?: {
-        gender?: GuestGender;
-        age?: number;
-        giftName?: string;
-        actorId?: string;
-        origin?: 'local' | 'relay';
-      },
+      meta?: { gender?: GuestGender; age?: number; giftName?: string; fromVoice?: boolean },
     ) => {
       const currentChallenger = activeChallengerRef.current;
-      // Identity is the id the ingest server minted for this viewer
-      // (`src/engine/liveIdentity.ts`); the handle is display text anyone may
-      // type. Messages from the SSE bus must carry that id - a remote event
-      // without one gets no authority, so an old relay or a new event kind
-      // cannot fall back into "this is the host typing". With no remote origin
-      // at all the message came from this browser, which is the host.
-      const isRemote = meta?.origin === 'relay';
-      const actorId = meta?.actorId ?? (isRemote ? '' : actorIdFor('local', username));
-      const isLocalOperator = !isRemote && isLocalActor(actorId);
+      const isChallenger =
+        username.toLowerCase() === currentChallenger.username.toLowerCase();
 
-      // 0. Live TikTok Gift Reaction -> Immediate joyful thank-you & synced gesture!
+      // 0. Live TikTok Gift Reaction -> Immediate joyful thank-you + VIP Fast-Track Queue Upgrade!
       if (meta?.giftName) {
         appendMessage({
           username,
           text: `Đã tặng ${meta.giftName}! ${text || ''}`.trim(),
           kind: 'viewer',
         });
+
+        // Upgrade gift sender to VIP priority in the challenger queue if they aren't already playing
+        if (!isChallenger) {
+          const vipEntry = {
+            ...createChallenger(
+              username,
+              meta.gender ?? 'nam',
+              meta.age ?? 26,
+            ),
+            isVip: true,
+            giftCount: 1,
+          };
+          setQueue((prev) => enqueueChallengerWithPriority(prev, vipEntry));
+        }
+
         if (appStateRef.current === 'playing' && !botThinkingRef.current) {
           const giftScript = buildLiveSessionBeat({
             beat: 'gift_reaction',
@@ -793,25 +1120,16 @@ export default function App() {
         return;
       }
 
-      // A relay event with no actor id cannot be attributed to anyone, so it may
-      // neither claim a seat nor move: it is shown as chat text and dropped.
-      if (isRemote && !meta?.actorId) {
-        appendMessage({ username, text, kind: 'viewer' });
-        return;
-      }
-
       const intent = classifyChatMessage(text);
-      const isChallenger = isLocalOperator || actorId === currentChallenger.actorId;
 
       // 1. Viewer requests to join challenge queue (!choi / !thachdau / lên đài)
       if (intent.type === 'challenge') {
         const entry = createChallenger(
           username,
-          actorId,
           meta?.gender ?? (Math.random() > 0.45 ? 'nam' : 'nu'),
           meta?.age ?? 22 + Math.floor(Math.random() * 28),
         );
-        setQueue((prev) => enqueueChallenger(prev, entry));
+        setQueue((prev) => enqueueChallengerWithPriority(prev, entry));
         appendMessage({ username, text, kind: 'viewer' });
         appendMessage({
           username: BOT_MASTER_PROFILE.name,
@@ -821,65 +1139,269 @@ export default function App() {
         return;
       }
 
-      // 2. Quick gender+age profile command (!nam 28, !nu 24)
+      // 2. Seat-Locked Gender+Age Profile Command (!nam 28, !nu 24)
+      // NEVER lets a random viewer hijack the active challenger's seat!
       if (intent.type === 'guest_profile' && intent.gender && intent.age) {
-        // The seat is not up for grabs: whoever types a profile command only
-        // rewrites the *current* challenger when they hold that seat.
-        if (!isChallenger) {
-          appendMessage({ username, text, kind: 'viewer' });
-          return;
-        }
         const matched = matchGuestCharacter(intent.gender, intent.age);
-        const updated = createChallenger(username, actorId, intent.gender, intent.age, matched);
-        setActiveChallenger(updated);
-        activeChallengerRef.current = updated;
-        stageRef.current?.setGuestCharacter(matched);
-        appendMessage({
-          username: BOT_MASTER_PROFILE.name,
-          text: `Khách mời ${username} hóa thân thành ${matched.name} (${matched.title})!`,
-          kind: 'system',
+        const updated = createChallenger(username, intent.gender, intent.age, matched);
+        const res = applySeatLockedProfileUpdate({
+          senderUsername: username,
+          activeChallenger: currentChallenger,
+          queue: queueRef.current,
+          updatedEntry: updated,
         });
+        if (res.updatedActive) {
+          setActiveChallenger(res.updatedActive);
+          activeChallengerRef.current = res.updatedActive;
+          stageRef.current?.setGuestCharacter(matched);
+          appendMessage({
+            username: BOT_MASTER_PROFILE.name,
+            text: `Khách mời ${username} hóa thân thành ${matched.name} (${matched.title})!`,
+            kind: 'system',
+          });
+        } else {
+          setQueue(res.updatedQueue);
+          appendMessage({
+            username: BOT_MASTER_PROFILE.name,
+            text: `Đã lưu nhân vật ${matched.name} cho ${username} trong hàng đợi (ghế hiện tại đang thuộc về ${currentChallenger.username}).`,
+            kind: 'system',
+          });
+        }
         return;
       }
 
-      // 3. Move command parsing if it's Red's turn & game is playing
       const liveBoard = boardRef.current;
-      if (
+      const redTurnOpen =
         appStateRef.current === 'playing' &&
         liveBoard.status === 'playing' &&
         liveBoard.turn === 'red' &&
-        !botThinkingRef.current &&
-        isChallenger
-      ) {
-        const parsed = parseVietnameseChatMove(
-          liveBoard,
-          text,
-          preferredPieceIdRef.current,
-        );
-        if (parsed.move) {
-          commitMove(parsed.move, username, 'red');
-          return;
-        }
-        if (intent.type === 'move_candidate' && parsed.error) {
-          setMoveHintError(parsed.error);
-          appendMessage({ username, text, kind: 'challenger' });
+        !botThinkingRef.current;
+
+      // 3. CROWD VOTE MODE: Any viewer can vote for the next Red move!
+      if (redTurnOpen && liveModeRef.current === 'crowd_vote') {
+        const parsed = parseVietnameseChatMove(liveBoard, text, preferredPieceIdRef.current);
+        if (parsed.move && parsed.notation) {
+          setCrowdVote((prev) => recordCrowdVote(prev, username, parsed.move!, liveBoard.grid));
           appendMessage({
-            username: BOT_MASTER_PROFILE.name,
-            text: parsed.error,
-            kind: 'system',
+            username,
+            text: `[Vote ${parsed.notation}] ${text}`,
+            kind: 'move',
           });
           return;
         }
       }
 
-      // 4. Otherwise display in live chat stream
-      appendMessage({
+      // 4. ACTIVE CHALLENGER PRIORITY CHANNEL (Tier 0 — 1v1 Duel)
+      if (isChallenger) {
+        // Challenger is clearly present -> clear ready check & AFK strikes
+        if (awaitingReadyCheckRef.current) {
+          setAwaitingReadyCheck(false);
+          setTurnSecondsLeft(45);
+        }
+        if (afkStrikesRef.current > 0) setAfkStrikes(0);
+
+        // 4A. Ready Check Confirmation
+        if (intent.type === 'ready_check') {
+          appendMessage({ username, text, kind: 'challenger' });
+          setTurnSecondsLeft(45);
+          appendMessage({
+            username: BOT_MASTER_PROFILE.name,
+            text: `${username} đã sẵn sàng ứng chiến! Mời hạ quân khai cuộc.`,
+            kind: 'system',
+          });
+          return;
+        }
+
+        // 4B. Special Live Challenger Commands (!xinthua, !hoaco, !dilai, !goiy)
+        if (intent.type === 'resign' && appStateRef.current === 'playing') {
+          appendMessage({ username, text, kind: 'challenger' });
+          const nextBoard: BoardState = { ...liveBoard, status: 'black_win' };
+          setBoard(nextBoard);
+          boardRef.current = nextBoard;
+          const script = buildLiveInteractionScript({
+            kind: 'resign_outro',
+            challengerName: currentChallenger.username,
+            guestGender: currentChallenger.gender,
+            guestAge: currentChallenger.age,
+            recentLines: recentLinesRef.current,
+          });
+          performScriptBeat(script, { notation: 'Nhận Thua' });
+          setAppState('gameover');
+          return;
+        }
+
+        if (intent.type === 'draw_offer' && appStateRef.current === 'playing') {
+          appendMessage({ username, text, kind: 'challenger' });
+          const redScore = analysisRef.current.score;
+          const script = buildLiveInteractionScript({
+            kind: 'draw_offer_response',
+            challengerName: currentChallenger.username,
+            guestGender: currentChallenger.gender,
+            guestAge: currentChallenger.age,
+            redScore,
+            recentLines: recentLinesRef.current,
+          });
+          performScriptBeat(script, { notation: 'Cầu Hòa' });
+          if (redScore > -130) {
+            const drawBoard: BoardState = { ...liveBoard, status: 'draw' };
+            setBoard(drawBoard);
+            boardRef.current = drawBoard;
+            setAppState('gameover');
+          }
+          return;
+        }
+
+        if (intent.type === 'undo_request' && appStateRef.current === 'playing') {
+          appendMessage({ username, text, kind: 'challenger' });
+          const script = buildLiveInteractionScript({
+            kind: 'undo_tease',
+            challengerName: currentChallenger.username,
+            guestGender: currentChallenger.gender,
+            guestAge: currentChallenger.age,
+            recentLines: recentLinesRef.current,
+          });
+          performScriptBeat(script, { notation: 'Xin Đi Lại' });
+          return;
+        }
+
+        if (intent.type === 'hint_request' && redTurnOpen) {
+          appendMessage({ username, text, kind: 'challenger' });
+          setShowAnalysis(true);
+          setPreviewVariationIdx(0);
+          const script = buildLiveInteractionScript({
+            kind: 'hint_reveal',
+            challengerName: currentChallenger.username,
+            guestGender: currentChallenger.gender,
+            guestAge: currentChallenger.age,
+            bestHintNotation: analysisRef.current.bestNotation,
+            recentLines: recentLinesRef.current,
+          });
+          performScriptBeat(script, { notation: 'Mách Kiếm Ý' });
+          return;
+        }
+
+        // 4C. Move Parsing on Red's Turn (Layer 1 Fast Parser -> Layer 2 Gemini NLU Fallback)
+        if (redTurnOpen && liveModeRef.current === 'duel_1v1') {
+          const parsed = parseVietnameseChatMove(
+            liveBoard,
+            text,
+            preferredPieceIdRef.current,
+          );
+          if (parsed.move) {
+            commitMove(parsed.move, username, 'red');
+            return;
+          }
+
+          if (parsed.ambiguous && parsed.candidates && parsed.candidates.length > 0) {
+            setMoveHintError(parsed.error ?? 'Nước đi có nhiều lựa chọn, vui lòng chọn rõ cột.');
+            appendMessage({ username, text, kind: 'challenger' });
+            stageRef.current?.setSelectionOverlay(
+              parsed.candidates[0].from,
+              parsed.candidates.map((c) => c.to),
+            );
+            const script = buildLiveInteractionScript({
+              kind: 'move_ambiguous',
+              challengerName: currentChallenger.username,
+              guestGender: currentChallenger.gender,
+              guestAge: currentChallenger.age,
+              candidateNotations: parsed.candidates.map((c) =>
+                formatMoveVietnamese(liveBoard.grid, c),
+              ),
+              recentLines: recentLinesRef.current,
+            });
+            performScriptBeat(script, { notation: 'Hỏi Lại Nước Đi' });
+            return;
+          }
+
+          if (parsed.needsAiFallback) {
+            appendMessage({ username, text, kind: 'challenger' });
+            void resolveMoveWithGeminiNlu(username, text, liveBoard);
+            return;
+          }
+
+          if (intent.type === 'move_candidate' && parsed.error) {
+            setMoveHintError(parsed.error);
+            appendMessage({ username, text, kind: 'challenger' });
+            appendMessage({
+              username: BOT_MASTER_PROFILE.name,
+              text: parsed.error,
+              kind: 'system',
+            });
+            const now = Date.now();
+            if (now - lastIllegalSpokenAtRef.current > 6000 && speakingEngineRef.current === null) {
+              lastIllegalSpokenAtRef.current = now;
+              const script = buildLiveInteractionScript({
+                kind: 'move_illegal',
+                challengerName: currentChallenger.username,
+                guestGender: currentChallenger.gender,
+                guestAge: currentChallenger.age,
+                recentLines: recentLinesRef.current,
+              });
+              performScriptBeat(script, { notation: 'Nhắc Luật' });
+            }
+            return;
+          }
+        }
+
+        // 4D. Casual Banter from the Active Challenger -> Kỳ Ma replies warmly in character!
+        appendMessage({ username, text, kind: 'challenger' });
+        if (
+          appStateRef.current === 'playing' &&
+          !botThinkingRef.current &&
+          autoCommentReplyRef.current &&
+          !meta?.fromVoice &&
+          text.trim().length >= 3
+        ) {
+          void respondToLiveChat('challenger_banter', username, text);
+        }
+        return;
+      }
+
+      // 5. GENERAL AUDIENCE COMMENTS -> Triage (Backseat Coach Detection + Spotlight Queue + Spam Filter)
+      appendMessage({ username, text, kind: 'viewer' });
+
+      if (appStateRef.current !== 'playing') return;
+      const decision = triageLiveComment({
         username,
         text,
-        kind: isChallenger ? 'challenger' : 'viewer',
+        isChallenger: false,
+        board: liveBoard,
       });
+
+      const now = Date.now();
+      const cooldownOk = now - lastViewerReplyAtRef.current >= 14_000;
+
+      // Tier 1: Caught a viewer whispering a legal move ("mách nước")!
+      if (
+        decision.category === 'backseat_coach' &&
+        autoCommentReplyRef.current &&
+        cooldownOk &&
+        !botThinkingRef.current &&
+        speakingEngineRef.current === null
+      ) {
+        lastViewerReplyAtRef.current = now;
+        void respondToLiveChat('backseat_coach', username, text, decision.suggestedNotation);
+        return;
+      }
+
+      // Tier 2: Save sharpest viewer question / cheer for idle-window spotlight reading
+      if (decision.tier === 2) {
+        setSpotlightComment((prev) => {
+          const isStale = !prev || now - prev.receivedAt > 20_000;
+          if (isStale || decision.score >= prev.score) {
+            return { username, text, score: decision.score, receivedAt: now };
+          }
+          return prev;
+        });
+      }
     },
-    [appendMessage, commitMove, performScriptBeat],
+    [
+      appendMessage,
+      commitMove,
+      performScriptBeat,
+      resolveMoveWithGeminiNlu,
+      respondToLiveChat,
+    ],
   );
 
   // Board click interaction handler (convenience alongside chat commands)
@@ -948,6 +1470,7 @@ export default function App() {
     stage.setZoomFocus('bot');
     stage.setCameraPreset('liveBot');
     stage.setTitleMode(!autoStart, autoStart);
+    stage.setPieceStyle(pieceStyleRef.current);
     stage.updateAnalysisVisuals(boardRef.current, analysis, true, null);
 
     return () => {
@@ -1000,6 +1523,28 @@ export default function App() {
     stageRef.current?.setZoomFocus(zoomFocus);
   }, [zoomFocus]);
 
+  // Sync high-contrast piece theme & label mode live into 3D textures + persist preference
+  useEffect(() => {
+    pieceStyleRef.current = pieceStyle;
+    stageRef.current?.setPieceStyle(pieceStyle);
+    try {
+      window.localStorage.setItem(PIECE_STYLE_STORAGE_KEY, JSON.stringify(pieceStyle));
+    } catch {
+      // ignore storage quota errors
+    }
+  }, [pieceStyle]);
+
+  const handleCyclePieceTheme = useCallback(() => {
+    setPieceStyle((prev) => ({ ...prev, theme: nextPieceTheme(prev.theme) }));
+  }, []);
+
+  const handleCyclePieceLabelMode = useCallback(() => {
+    setPieceStyle((prev) => ({
+      ...prev,
+      labelMode: nextPieceLabelMode(prev.labelMode),
+    }));
+  }, []);
+
   // Subscribe to real-time SSE TikTok Live Stream from Express backend
   const processIncomingChatRef = useRef(processIncomingChat);
   useEffect(() => {
@@ -1016,10 +1561,6 @@ export default function App() {
             gender: data.gender,
             age: data.age,
             giftName: data.giftName,
-            // Everything on this bus came over the network, so it is identified
-            // only by the id the server minted, never by the handle in the body.
-            origin: 'relay',
-            actorId: typeof data.actorId === 'string' ? data.actorId : undefined,
           });
         }
       } catch {
@@ -1031,69 +1572,336 @@ export default function App() {
     };
   }, []);
 
+  // Clear Crowd Vote tally & pending voice move whenever turn advances
+  useEffect(() => {
+    setCrowdVote(createEmptyCrowdVote());
+    setPendingVoiceMove(null);
+    if (voiceConfirmTimerRef.current) {
+      window.clearTimeout(voiceConfirmTimerRef.current);
+      voiceConfirmTimerRef.current = null;
+    }
+  }, [board.moveCount, liveMode]);
+
   // Turn countdown timer & live viewer fluctuation while playing
   useEffect(() => {
     if (appState !== 'playing') return;
     const timer = window.setInterval(() => {
       setViewerCount((v) => Math.max(820, v + Math.floor(Math.random() * 11) - 4));
       setTurnSecondsLeft((sec) => {
-        if (boardRef.current.turn !== 'red' || botThinkingRef.current) return 45;
-        return sec > 0 ? sec - 1 : 45;
+        if (boardRef.current.turn !== 'red' || botThinkingRef.current) {
+          return liveModeRef.current === 'crowd_vote' ? 18 : 45;
+        }
+        return sec > 0 ? sec - 1 : 0;
       });
     }, 1000);
     return () => window.clearInterval(timer);
   }, [appState]);
 
-  // Playful, non-spammy Live Host thinking nudge (~18s in) & countdown alert (8s left)
+  const handleCommitCrowdVote = useCallback(() => {
+    const liveBoard = boardRef.current;
+    if (
+      appStateRef.current !== 'playing' ||
+      liveBoard.status !== 'playing' ||
+      liveBoard.turn !== 'red' ||
+      botThinkingRef.current
+    ) {
+      return;
+    }
+    const tally = tallyCrowdVotes(crowdVoteRef.current, 3);
+    const winner = tally[0];
+    const fallbackMove = analysisRef.current.bestMove ?? generateLegalMoves(liveBoard.grid, 'red')[0];
+    const chosenMove = winner?.move ?? fallbackMove;
+    if (!chosenMove) return;
+
+    const notation = winner?.notation ?? formatMoveVietnamese(liveBoard.grid, chosenMove);
+    const total = crowdVoteRef.current.totalVotes;
+    setCrowdVote(createEmptyCrowdVote());
+    setTurnSecondsLeft(18);
+
+    const guest = activeChallengerRef.current;
+    if (total > 0) {
+      const announce = buildLiveInteractionScript({
+        kind: 'crowd_vote_commit',
+        challengerName: guest.username,
+        guestGender: guest.gender,
+        guestAge: guest.age,
+        suggestedNotation: notation,
+        voteCount: winner?.count ?? total,
+        recentLines: recentLinesRef.current,
+      });
+      performScriptBeat(announce, { notation: `Vote: ${notation}` });
+    }
+    commitMove(chosenMove, total > 0 ? `Cả Phòng Live (${winner?.count ?? total} phiếu)` : 'Kiếm Ý Khán Giả', 'red');
+  }, [commitMove, performScriptBeat]);
+
+  const handleReadSpotlightComment = useCallback(() => {
+    if (!spotlightComment || botThinkingRef.current) return;
+    const picked = spotlightComment;
+    setSpotlightComment(null);
+    lastViewerReplyAtRef.current = Date.now();
+    void respondToLiveChat('viewer_spotlight', picked.username, picked.text);
+  }, [respondToLiveChat, spotlightComment]);
+
+  const handleSelectLiveMode = useCallback(
+    (nextMode: LiveControlMode) => {
+      setLiveMode(nextMode);
+      setCrowdVote(createEmptyCrowdVote());
+      setAwaitingReadyCheck(false);
+      setAfkStrikes(0);
+      setTurnSecondsLeft(nextMode === 'crowd_vote' ? 18 : 45);
+      appendMessage({
+        username: BOT_MASTER_PROFILE.name,
+        text:
+          nextMode === 'crowd_vote'
+            ? 'Đã bật chế độ CẢ PHÒNG BỎ PHIẾU! Mọi khán giả đều gõ nước đi (vd: p25, m87, pháo đầu) để hợp sức đấu Kỳ Ma!'
+            : `Đã quay về chế độ ĐẤU 1v1 cùng người được chọn ${activeChallengerRef.current.username}.`,
+        kind: 'system',
+      });
+    },
+    [appendMessage],
+  );
+
+  // Voice Move Listener handlers (with 1.6s confirmation window & Echo-Guard)
+  const handleConfirmPendingVoiceMove = useCallback(() => {
+    if (voiceConfirmTimerRef.current) {
+      window.clearTimeout(voiceConfirmTimerRef.current);
+      voiceConfirmTimerRef.current = null;
+    }
+    setPendingVoiceMove((curr) => {
+      if (curr && boardRef.current.turn === 'red' && !botThinkingRef.current) {
+        commitMove(curr.move, activeChallengerRef.current.username, 'red');
+      }
+      return null;
+    });
+  }, [commitMove]);
+
+  const handleCancelPendingVoiceMove = useCallback(() => {
+    if (voiceConfirmTimerRef.current) {
+      window.clearTimeout(voiceConfirmTimerRef.current);
+      voiceConfirmTimerRef.current = null;
+    }
+    setPendingVoiceMove(null);
+    setVoiceInterimText('');
+  }, []);
+
+  const handleToggleVoiceListening = useCallback(() => {
+    if (voiceMoveListener.isActive()) {
+      voiceMoveListener.stop();
+      setVoiceListening(false);
+      setVoiceInterimText('');
+      handleCancelPendingVoiceMove();
+      return;
+    }
+
+    const started = voiceMoveListener.start({
+      onTranscript: ({ transcript, isFinal }) => {
+        setVoiceInterimText(transcript);
+        const liveBoard = boardRef.current;
+        if (
+          appStateRef.current !== 'playing' ||
+          liveBoard.status !== 'playing' ||
+          liveBoard.turn !== 'red' ||
+          botThinkingRef.current
+        ) {
+          return;
+        }
+        const parsed = parseVietnameseChatMove(
+          liveBoard,
+          transcript,
+          preferredPieceIdRef.current,
+        );
+        if (parsed.move && parsed.notation) {
+          if (voiceConfirmTimerRef.current) window.clearTimeout(voiceConfirmTimerRef.current);
+          const matchedMove = parsed.move;
+          const matchedNotation = parsed.notation;
+          setPendingVoiceMove({
+            move: matchedMove,
+            notation: matchedNotation,
+            transcript,
+          });
+          setVoiceInterimText('');
+          voiceConfirmTimerRef.current = window.setTimeout(() => {
+            voiceConfirmTimerRef.current = null;
+            setPendingVoiceMove((curr) => {
+              if (
+                curr &&
+                curr.notation === matchedNotation &&
+                boardRef.current.turn === 'red' &&
+                !botThinkingRef.current
+              ) {
+                commitMove(curr.move, activeChallengerRef.current.username, 'red');
+              }
+              return null;
+            });
+          }, 1600);
+        } else if (isFinal && parsed.needsAiFallback) {
+          void resolveMoveWithGeminiNlu(
+            activeChallengerRef.current.username,
+            transcript,
+            liveBoard,
+          );
+          setVoiceInterimText('');
+        } else if (isFinal) {
+          setVoiceInterimText('');
+        }
+      },
+      onError: (msg) => {
+        setMoveHintError(msg);
+        setVoiceListening(false);
+      },
+      onStatus: (listening) => setVoiceListening(listening),
+    });
+
+    if (started) {
+      voiceMoveListener.setSuppressed(speakingEngineRef.current !== null || botThinkingRef.current);
+      setMoveHintError(null);
+    }
+  }, [commitMove, handleCancelPendingVoiceMove, resolveMoveWithGeminiNlu]);
+
+  useEffect(() => {
+    return () => {
+      voiceMoveListener.stop();
+      if (voiceConfirmTimerRef.current) window.clearTimeout(voiceConfirmTimerRef.current);
+    };
+  }, []);
+
+  // Smart Turn Clock: idle viewer spotlight reading, 10s warning, AFK auto-move/rotate, and Crowd Vote commit!
   useEffect(() => {
     if (
       appState !== 'playing' ||
       board.status !== 'playing' ||
       board.turn !== 'red' ||
-      botThinking ||
-      speakingEngine !== null ||
-      board.moveCount < 1
+      botThinking
     ) {
       return;
     }
     const turnKey = `${turnSeqRef.current}_${board.moveCount}`;
     const guest = activeChallengerRef.current;
 
-    if (turnSecondsLeft === 27 && nudgedTurnKeyRef.current !== turnKey) {
+    // Idle Window (~17s into turn): spotlight the sharpest viewer comment if available, otherwise gentle thinking nudge!
+    if (
+      liveMode === 'duel_1v1' &&
+      !awaitingReadyCheck &&
+      turnSecondsLeft === 28 &&
+      nudgedTurnKeyRef.current !== turnKey &&
+      speakingEngine === null
+    ) {
       nudgedTurnKeyRef.current = turnKey;
-      const nudge = buildLiveSessionBeat({
-        beat: 'thinking_nudge',
-        challengerName: guest.username,
-        guestTitle: guest.character.title,
-        guestGender: guest.gender,
-        guestAge: guest.age,
-        winProbRed: analysisRef.current.winProbRed,
-        moveCount: board.moveCount,
-        recentLines: recentLinesRef.current,
-      });
-      performScriptBeat(nudge, { notation: 'Đợi Xuất Chiêu' });
-    } else if (turnSecondsLeft === 8 && countdownTurnKeyRef.current !== turnKey) {
+      const now = Date.now();
+      if (
+        autoCommentReply &&
+        spotlightComment &&
+        now - spotlightComment.receivedAt <= 22_000 &&
+        now - lastViewerReplyAtRef.current >= 14_000
+      ) {
+        const picked = spotlightComment;
+        setSpotlightComment(null);
+        lastViewerReplyAtRef.current = now;
+        void respondToLiveChat('viewer_spotlight', picked.username, picked.text);
+      } else if (board.moveCount >= 1) {
+        const nudge = buildLiveSessionBeat({
+          beat: 'thinking_nudge',
+          challengerName: guest.username,
+          guestTitle: guest.character.title,
+          guestGender: guest.gender,
+          guestAge: guest.age,
+          winProbRed: analysisRef.current.winProbRed,
+          moveCount: board.moveCount,
+          recentLines: recentLinesRef.current,
+        });
+        performScriptBeat(nudge, { notation: 'Đợi Xuất Chiêu' });
+      }
+      return;
+    }
+
+    const clockAction = evaluateTurnClockTransition({
+      secondsLeft: turnSecondsLeft,
+      awaitingReadyCheck,
+      afkStrikes,
+      queueLength: queue.length,
+      mode: liveMode,
+    });
+
+    if (clockAction.type === 'warn_10s' && countdownTurnKeyRef.current !== turnKey && speakingEngine === null) {
       countdownTurnKeyRef.current = turnKey;
-      const alert = buildLiveSessionBeat({
-        beat: 'countdown_alert',
+      const warn = buildLiveInteractionScript({
+        kind: 'afk_warn_10s',
         challengerName: guest.username,
-        guestTitle: guest.character.title,
         guestGender: guest.gender,
         guestAge: guest.age,
-        winProbRed: analysisRef.current.winProbRed,
-        moveCount: board.moveCount,
         recentLines: recentLinesRef.current,
       });
-      performScriptBeat(alert, { notation: 'Đếm Ngược 8s' });
+      performScriptBeat(warn, { notation: 'Đếm Ngược 10s' });
+    } else if (clockAction.type === 'crowd_vote_commit') {
+      handleCommitCrowdVote();
+    } else if (clockAction.type === 'ready_timeout_extend') {
+      setAwaitingReadyCheck(false);
+      setTurnSecondsLeft(45);
+    } else if (
+      clockAction.type === 'ready_timeout_rotate' ||
+      clockAction.type === 'afk_rotate_challenger'
+    ) {
+      const { picked, rest } = pickNextChallenger(queue, 'fifo');
+      if (picked) {
+        setQueue(rest);
+        setActiveChallenger(picked);
+        activeChallengerRef.current = picked;
+        stageRef.current?.setGuestCharacter(picked.character);
+        setAfkStrikes(0);
+        setAwaitingReadyCheck(true);
+        setTurnSecondsLeft(20);
+        const rotateScript = buildLiveInteractionScript({
+          kind: 'afk_rotate',
+          challengerName: guest.username,
+          guestGender: guest.gender,
+          guestAge: guest.age,
+          nextChallengerName: picked.username,
+          recentLines: recentLinesRef.current,
+        });
+        performScriptBeat(rotateScript, { notation: 'Luân Chuyển Đài' });
+        appendMessage({
+          username: BOT_MASTER_PROFILE.name,
+          text: `${guest.username} quá giờ phản hồi — mời ${picked.username} lên đài (gõ nước đi hoặc "sẵn sàng" trong 20s)!`,
+          kind: 'system',
+        });
+      } else {
+        setTurnSecondsLeft(45);
+      }
+    } else if (clockAction.type === 'afk_auto_move_warn') {
+      setAfkStrikes(clockAction.nextStrikes);
+      setTurnSecondsLeft(45);
+      const bestRed =
+        analysisRef.current.bestMove ?? generateLegalMoves(boardRef.current.grid, 'red')[0];
+      if (bestRed) {
+        const autoScript = buildLiveInteractionScript({
+          kind: 'afk_auto_move',
+          challengerName: guest.username,
+          guestGender: guest.gender,
+          guestAge: guest.age,
+          recentLines: recentLinesRef.current,
+        });
+        performScriptBeat(autoScript, { notation: 'Đi Hộ Giữ Nhịp' });
+        commitMove(bestRed, `${guest.username} (Hết giờ)`, 'red');
+      }
     }
   }, [
+    afkStrikes,
     appState,
+    appendMessage,
+    autoCommentReply,
+    awaitingReadyCheck,
     board.moveCount,
     board.status,
     board.turn,
     botThinking,
+    commitMove,
+    handleCommitCrowdVote,
+    liveMode,
     performScriptBeat,
+    queue,
+    respondToLiveChat,
     speakingEngine,
+    spotlightComment,
     turnSecondsLeft,
   ]);
 
@@ -1241,8 +2049,7 @@ export default function App() {
       explicitChar?: WuxiaCharacterProfile,
     ) => {
       const char = explicitChar ?? matchGuestCharacter(gender, age);
-      const handle = username || '@KhachMoi';
-      const entry = createChallenger(handle, localSeat(handle), gender, age, char);
+      const entry = createChallenger(username || '@KhachMoi', gender, age, char);
       setActiveChallenger(entry);
       activeChallengerRef.current = entry;
       stageRef.current?.setGuestCharacter(char);
@@ -1270,31 +2077,45 @@ export default function App() {
 
   const handlePickFromQueue = useCallback(
     (mode: 'fifo' | 'random' | string) => {
-      const pickMode = mode === 'random' ? 'random' : 'fifo';
-      const { picked, rest } = pickNextChallenger(queue, pickMode);
+      let picked: ChallengerEntry | null = null;
+      let rest: ChallengerEntry[] = queue;
+
+      if (mode === 'fifo' || mode === 'random') {
+        const res = pickNextChallenger(queue, mode);
+        picked = res.picked;
+        rest = res.rest;
+      } else {
+        // Explicit queue ID picked directly by host
+        const found = queue.find((q) => q.id === mode);
+        if (found) {
+          picked = found;
+          rest = queue.filter((q) => q.id !== mode);
+        }
+      }
+
       if (!picked) return;
       setQueue(rest);
       setActiveChallenger(picked);
       activeChallengerRef.current = picked;
+      setAfkStrikes(0);
+      setAwaitingReadyCheck(true);
+      setTurnSecondsLeft(20);
       stageRef.current?.setGuestCharacter(picked.character);
       appendMessage({
         username: BOT_MASTER_PROFILE.name,
-        text: `Bot đã chọn ${picked.username} (${picked.character.title}) làm kỳ thủ tiếp theo! Mời xuất chiêu qua khung chat.`,
+        text: `Đã mời ${picked.username}${picked.isVip ? ' [VIP]' : ''} (${picked.character.title}) lên đài! Gõ nước đi hoặc nhắn "sẵn sàng" trong 20 giây.`,
         kind: 'bot',
       });
       wuxiaAudio.playGuzhengSweep();
       if (appStateRef.current === 'playing' && !botThinkingRef.current) {
-        const welcome = buildLiveSessionBeat({
-          beat: 'challenger_welcome',
+        const readyScript = buildLiveInteractionScript({
+          kind: 'ready_check_call',
           challengerName: picked.username,
-          guestTitle: picked.character.title,
           guestGender: picked.gender,
           guestAge: picked.age,
-          winProbRed: analysisRef.current.winProbRed,
-          moveCount: boardRef.current.moveCount,
           recentLines: recentLinesRef.current,
         });
-        performScriptBeat(welcome, { notation: 'Mời Cao Thủ Lên Đài' });
+        performScriptBeat(readyScript, { notation: 'Mời Cao Thủ Lên Đài' });
       }
     },
     [appendMessage, performScriptBeat, queue],
@@ -1345,19 +2166,24 @@ export default function App() {
     [commentary, hostEmotion, muted, triggerBotSpeaking, voiceEnabled],
   );
 
-  // The Studio Test button used to POST /api/live/webhook while claiming the
-  // seated player's handle, which is exactly the spoof the relay endpoint now
-  // refuses: ingest needs the server-side token, and identity comes from the
-  // actor id the server mints. So the button injects the same event locally,
-  // as the actor currently holding the seat.
-  const handleTestWebhook = useCallback(() => {
-    const seated = activeChallengerRef.current;
-    const comment =
-      boardRef.current.moveCount === 0
-        ? 'p2 bình 5'
-        : 'Chào Kỳ Ma từ TikTok Live Webhook!';
-    processIncomingChatRef.current(seated.username, comment, { actorId: seated.actorId });
-  }, []);
+  const handleTestWebhook = useCallback(async () => {
+    try {
+      await fetch('/api/live/webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uniqueId: activeChallengerRef.current.username.replace(/^@/, ''),
+          comment: boardRef.current.moveCount === 0 ? 'p2 bình 5' : 'Chào Kỳ Ma từ TikTok Live Webhook!',
+        }),
+      });
+    } catch {
+      appendMessage({
+        username: 'Hệ thống',
+        text: 'Không gửi được tín hiệu thử nghiệm tới /api/live/webhook.',
+        kind: 'system',
+      });
+    }
+  }, [appendMessage]);
 
   // Global keyboard shortcuts (Enter/Space on Title, H dock toggle, P/Esc pause, M mute)
   useEffect(() => {
@@ -1450,6 +2276,9 @@ export default function App() {
           onHoverVariation={setPreviewVariationIdx}
           difficulty={difficulty}
           onSelectDifficulty={setDifficulty}
+          pieceStyle={pieceStyle}
+          onCyclePieceTheme={handleCyclePieceTheme}
+          onCyclePieceLabelMode={handleCyclePieceLabelMode}
           muted={muted}
           onToggleMute={handleToggleMute}
           voiceEnabled={voiceEnabled}
@@ -1471,7 +2300,7 @@ export default function App() {
           onReplayVoice={() => handleReplayOrTestVoice()}
           onTestVoice={() =>
             handleReplayOrTestVoice(
-              'Đêm hoa chúc... ánh trăng in bóng hồ sen đẹp quá! Chàng thắng ván này thì thiếp nhường một lớp hồi môn — còn thua thì ra hành lang ngắm trăng nha!',
+              'Đêm hoa chúc... ánh trăng in bóng hồ sen đẹp quá! Chàng thắng ván này thì thiếp nghe lời — còn thua thì ra hành lang ngắm trăng nha!',
             )
           }
           onRequestAiCommentary={() => {
@@ -1503,6 +2332,27 @@ export default function App() {
           aiLoading={aiLoading}
           audienceWaveOn={audienceWaveOn}
           onToggleAudienceWave={() => setAudienceWaveOn((w) => !w)}
+          autoCommentReply={autoCommentReply}
+          onToggleAutoCommentReply={() => setAutoCommentReply((v) => !v)}
+          liveMode={liveMode}
+          onSelectLiveMode={handleSelectLiveMode}
+          crowdTopVotes={tallyCrowdVotes(crowdVote, 3)}
+          crowdTotalVotes={crowdVote.totalVotes}
+          onCommitCrowdVote={handleCommitCrowdVote}
+          voiceListening={voiceListening}
+          voiceInterimText={voiceInterimText}
+          pendingVoiceMove={
+            pendingVoiceMove
+              ? {
+                  notation: pendingVoiceMove.notation,
+                  transcript: pendingVoiceMove.transcript,
+                }
+              : null
+          }
+          onToggleVoiceListening={handleToggleVoiceListening}
+          onConfirmPendingVoiceMove={handleConfirmPendingVoiceMove}
+          onCancelPendingVoiceMove={handleCancelPendingVoiceMove}
+          awaitingReadyCheck={awaitingReadyCheck}
           onSubmitChat={(username, text) => processIncomingChat(username, text)}
           onApplyGuestQuickMatch={handleApplyGuestQuickMatch}
           onPickFromQueue={handlePickFromQueue}
@@ -1558,6 +2408,8 @@ export default function App() {
             muted={muted}
             tiktokFrame={tiktokFrame}
             viewerCount={viewerCount}
+            liveMode={liveMode}
+            awaitingReadyCheck={awaitingReadyCheck}
             onToggleAnalysis={() => {
               setShowAnalysis((s) => {
                 const next = !s;
@@ -1568,6 +2420,9 @@ export default function App() {
             onToggleSplitScreen={() => setSplitScreen((s) => !s)}
             onToggleMute={handleToggleMute}
             onToggleTikTokFrame={() => setTiktokFrame((f) => !f)}
+            pieceStyle={pieceStyle}
+            onCyclePieceTheme={handleCyclePieceTheme}
+            onCyclePieceLabelMode={handleCyclePieceLabelMode}
             onPause={() => setAppState('paused')}
           />
 
@@ -1590,9 +2445,33 @@ export default function App() {
             activeChallenger={activeChallenger}
             audienceWaveOn={audienceWaveOn}
             onToggleAudienceWave={() => setAudienceWaveOn((w) => !w)}
+            autoCommentReply={autoCommentReply}
+            onToggleAutoCommentReply={() => setAutoCommentReply((v) => !v)}
+            liveMode={liveMode}
+            onSelectLiveMode={handleSelectLiveMode}
+            crowdTopVotes={tallyCrowdVotes(crowdVote, 3)}
+            crowdTotalVotes={crowdVote.totalVotes}
+            onCommitCrowdVote={handleCommitCrowdVote}
+            voiceListening={voiceListening}
+            voiceInterimText={voiceInterimText}
+            pendingVoiceMove={
+              pendingVoiceMove
+                ? {
+                    notation: pendingVoiceMove.notation,
+                    transcript: pendingVoiceMove.transcript,
+                  }
+                : null
+            }
+            onToggleVoiceListening={handleToggleVoiceListening}
+            onConfirmPendingVoiceMove={handleConfirmPendingVoiceMove}
+            onCancelPendingVoiceMove={handleCancelPendingVoiceMove}
+            onReadSpotlightComment={handleReadSpotlightComment}
+            hasSpotlightComment={spotlightComment !== null}
             onSubmitChat={(username, text) => processIncomingChat(username, text)}
             moveHintError={moveHintError}
             queue={queue}
+            awaitingReadyCheck={awaitingReadyCheck}
+            afkStrikes={afkStrikes}
             onApplyGuestQuickMatch={handleApplyGuestQuickMatch}
             onPickFromQueue={handlePickFromQueue}
             analysis={analysis}
@@ -1635,6 +2514,8 @@ export default function App() {
             onToggleTikTokFrame={() => setTiktokFrame((f) => !f)}
             zoomFocus={zoomFocus}
             onSelectZoomFocus={setZoomFocus}
+            pieceStyle={pieceStyle}
+            onSelectPieceStyle={setPieceStyle}
             difficulty={difficulty}
             onSelectDifficulty={setDifficulty}
             voiceEnabled={voiceEnabled}
@@ -1654,7 +2535,7 @@ export default function App() {
             }}
             onTestVoice={() =>
               handleReplayOrTestVoice(
-                'Đêm hoa chúc... ánh trăng in bóng hồ sen đẹp quá! Chàng thắng ván này thì thiếp nhường một lớp hồi môn — còn thua thì ra hành lang ngắm trăng nha!',
+                'Đêm hoa chúc... ánh trăng in bóng hồ sen đẹp quá! Chàng thắng ván này thì thiếp nghe lời — còn thua thì ra hành lang ngắm trăng nha!',
               )
             }
             onResetMatch={handleResetMatch}

@@ -32,7 +32,6 @@ import {
   unmakeNullMoveFast,
 } from './xiangqiFast';
 import { colToFile, formatMoveVietnamese } from './notation';
-import { KillPatternHit, detectKillPattern } from './patterns';
 
 export type BotDifficulty = 'nhap_mon' | 'cao_thu' | 'tong_su';
 
@@ -65,13 +64,17 @@ export interface DeepAnalysisResult {
   variations: TacticalVariation[];
   threats: TacticalThreat[];
   motif: string;
-  /** Named 杀法 detected on the move, when the geometry really matches a classic kill pattern. */
-  killPattern?: KillPatternHit;
   tacticalSummary: string;
   /** Depth actually completed by Iterative Deepening (for diagnostics / tests) */
   searchDepth?: number;
   /** Position Zobrist key of the analyzed state */
   positionKey?: string;
+  /** Multi-ply Principal Variation tactical continuation in Vietnamese notation */
+  pvLine?: string[];
+  /** Total nodes searched in this analysis call */
+  nodesSearched?: number;
+  /** Wall-clock time spent searching in milliseconds */
+  elapsedMs?: number;
 }
 
 const PIECE_VALUE: Record<PieceType, number> = {
@@ -158,8 +161,9 @@ const MOVE_BUF = new Int32Array(MAX_PLY * 128);
 const SCORE_BUF = new Int32Array(MAX_PLY * 128);
 const KILLER_1 = new Int32Array(MAX_PLY);
 const KILLER_2 = new Int32Array(MAX_PLY);
-// History heuristic indexed by (from * 90 + to)
+// History heuristic & Countermove table indexed by (from * 90 + to)
 const HISTORY = new Int32Array(90 * 90);
+const COUNTERMOVE = new Int32Array(90 * 90);
 
 interface SearchCtx {
   nodes: number;
@@ -176,6 +180,7 @@ function scoreMoveFast(
   mv: number,
   ply: number,
   pvMove: number,
+  counterMove = 0,
 ): number {
   if (mv === pvMove) return 2_000_000;
 
@@ -193,6 +198,7 @@ function scoreMoveFast(
 
   if (mv === KILLER_1[ply]) return 900_000;
   if (mv === KILLER_2[ply]) return 850_000;
+  if (counterMove !== 0 && mv === counterMove) return 820_000;
 
   return HISTORY[from * 90 + to];
 }
@@ -347,6 +353,7 @@ function negamax(
   extensions: number,
   allowNull: boolean,
   ctx: SearchCtx,
+  prevMove = 0,
 ): number {
   ctx.nodes++;
   if ((ctx.nodes & 1023) === 0) {
@@ -429,11 +436,12 @@ function negamax(
     }
   }
 
-  // 3. Move Generation & Ordering
+  // 3. Move Generation & Ordering (PV -> MVV-LVA Captures -> Killers -> Countermove -> History)
   const start = ply * 128;
   const end = generatePseudoMovesFast(b, MOVE_BUF, start, false);
+  const counterMv = prevMove !== 0 ? COUNTERMOVE[moveFrom(prevMove) * 90 + moveTo(prevMove)] : 0;
   for (let i = start; i < end; i++) {
-    SCORE_BUF[i] = scoreMoveFast(b, MOVE_BUF[i], ply, ttBestMove);
+    SCORE_BUF[i] = scoreMoveFast(b, MOVE_BUF[i], ply, ttBestMove, counterMv);
   }
 
   let bestScore = -INF;
@@ -462,7 +470,7 @@ function negamax(
     let score: number;
     if (legalCount === 1) {
       // Full-window search for Principal Variation move
-      score = -negamax(b, nextDepth - 1, -beta, -alpha, ply + 1, nextExt, true, ctx);
+      score = -negamax(b, nextDepth - 1, -beta, -alpha, ply + 1, nextExt, true, ctx, mv);
     } else {
       // Late Move Reductions (LMR) for quiet, non-checking, non-killer late moves
       const canReduce =
@@ -472,7 +480,8 @@ function negamax(
         !givesCheck &&
         !isCapture &&
         mv !== KILLER_1[ply] &&
-        mv !== KILLER_2[ply];
+        mv !== KILLER_2[ply] &&
+        mv !== counterMv;
 
       if (canReduce) {
         const reduction = legalCount >= 14 && nextDepth >= 4 ? 2 : 1;
@@ -485,6 +494,7 @@ function negamax(
           nextExt,
           true,
           ctx,
+          mv,
         );
       } else {
         // Zero-window PVS scout
@@ -497,12 +507,13 @@ function negamax(
           nextExt,
           true,
           ctx,
+          mv,
         );
       }
 
       // Full-window re-search if scout beat alpha
       if (!ctx.aborted && score > alpha && (canReduce || score < beta)) {
-        score = -negamax(b, nextDepth - 1, -beta, -alpha, ply + 1, nextExt, true, ctx);
+        score = -negamax(b, nextDepth - 1, -beta, -alpha, ply + 1, nextExt, true, ctx, mv);
       }
     }
 
@@ -518,11 +529,14 @@ function negamax(
       if (score > alpha) {
         alpha = score;
         if (alpha >= beta) {
-          // Beta cutoff -> update Killer & History heuristics for quiet moves
+          // Beta cutoff -> update Killer, Countermove & History heuristics for quiet moves
           if (!isCapture) {
             if (KILLER_1[ply] !== mv) {
               KILLER_2[ply] = KILLER_1[ply];
               KILLER_1[ply] = mv;
+            }
+            if (prevMove !== 0) {
+              COUNTERMOVE[moveFrom(prevMove) * 90 + moveTo(prevMove)] = mv;
             }
             const hIdx = moveFrom(mv) * 90 + moveTo(mv);
             const bonus = nextDepth * nextDepth;
@@ -703,6 +717,56 @@ function extractBestReplyMove(
   return bestPacked !== 0 ? unpackMoveToBoardMove(gridAfterMove, bestPacked) : null;
 }
 
+/** Walks the Transposition Table to extract a clean multi-ply Principal Variation line */
+function extractPvLine(
+  rootBoard: FastBoard,
+  rootGrid: BoardState['grid'],
+  firstPacked: number,
+  maxPlies = 4,
+): string[] {
+  const line: string[] = [];
+  const visited = new Set<string>();
+  const played: number[] = [];
+  let curGrid = rootGrid;
+  let nextPacked = firstPacked;
+
+  for (let step = 0; step < maxPlies && nextPacked !== 0; step++) {
+    const key = fastBoardHashKey(rootBoard);
+    if (visited.has(key)) break;
+    visited.add(key);
+
+    const side = rootBoard.side;
+    const unpacked = unpackMoveToBoardMove(curGrid, nextPacked);
+    if (!unpacked) break;
+
+    makeMoveFast(rootBoard, nextPacked);
+    if (isSideInCheckFast(rootBoard, side)) {
+      unmakeMoveFast(rootBoard, nextPacked);
+      break;
+    }
+    played.push(nextPacked);
+    line.push(formatMoveVietnamese(curGrid, unpacked));
+    curGrid = applyMoveOnGrid(curGrid, unpacked);
+
+    const ttIdx = rootBoard.hashLo & TT_MASK;
+    if (
+      ttGen[ttIdx] === currentSearchGen &&
+      ttKeyLo[ttIdx] === rootBoard.hashLo &&
+      ttKeyHi[ttIdx] === rootBoard.hashHi &&
+      ttMove[ttIdx] !== 0
+    ) {
+      nextPacked = ttMove[ttIdx];
+    } else {
+      nextPacked = 0;
+    }
+  }
+
+  for (let i = played.length - 1; i >= 0; i--) {
+    unmakeMoveFast(rootBoard, played[i]);
+  }
+  return line;
+}
+
 // ============================================================================
 // MOTIF, THREATS & WIN PROBABILITY
 // ============================================================================
@@ -730,16 +794,11 @@ export function detectMoveMotif(
     return 'Pháo Đầu Trấn Trung';
   }
   if (move.piece.type === 'horse') {
-    const enemyFishingPost =
+    const enemyPalaceCorner =
       move.piece.side === 'red'
         ? move.to.row === 2 && (move.to.col === 2 || move.to.col === 6)
         : move.to.row === 7 && (move.to.col === 2 || move.to.col === 6);
-    if (enemyFishingPost) return 'Điếu Ngư Mã Áp Cung';
-    const enemyThroatPost =
-      move.piece.side === 'red'
-        ? move.to.row === 1 && (move.to.col === 2 || move.to.col === 6)
-        : move.to.row === 8 && (move.to.col === 2 || move.to.col === 6);
-    if (enemyThroatPost) return 'Ngọa Tào Mã Áp Cung';
+    if (enemyPalaceCorner) return 'Ngọa Tào Mã Áp Cung';
     if (toFile === 3 || toFile === 7) return 'Bình Phong Khởi Mã';
     return 'Phi Mã Xuất Trận';
   }
@@ -815,6 +874,7 @@ export function analyzePosition(
   difficulty: BotDifficulty = 'cao_thu',
   options?: AnalyzeOptions,
 ): DeepAnalysisResult {
+  const startedAt = Date.now();
   const side = state.turn;
   const fb = createFastBoard(state.grid, side);
   const positionKey = fastBoardHashKey(fb);
@@ -949,6 +1009,7 @@ export function analyzePosition(
   // Snapshot of the last FULLY completed iteration so partial/aborted depths never lose a move
   let completedOrder: RootEntry[] = entries;
   let completedDepth = 0;
+  let prevBestRawScore = 0;
 
   for (let depth = 1; depth <= maxDepth; depth++) {
     ctx.aborted = false;
@@ -957,7 +1018,7 @@ export function analyzePosition(
     let bestRawScore = -INF;
     const beta = INF;
 
-    // True PVS at root: search #1 PV move with full window, scout remaining moves with exact threshold!
+    // True PVS + Aspiration Window at root: narrow window on PV move at depth >= 4, widen immediately on fail!
     for (let i = 0; i < completedOrder.length; i++) {
       const entry = completedOrder[i];
       const jitter =
@@ -972,7 +1033,17 @@ export function analyzePosition(
       let isExact = true;
 
       if (i === 0) {
-        scoreSide = -negamax(fb, depth - 1, -INF, INF, 1, 0, true, ctx);
+        if (depth >= 4 && Math.abs(prevBestRawScore) < MATE_THRESHOLD) {
+          const aspDelta = 85;
+          const aspAlpha = prevBestRawScore - aspDelta;
+          const aspBeta = prevBestRawScore + aspDelta;
+          scoreSide = -negamax(fb, depth - 1, -aspBeta, -aspAlpha, 1, 0, true, ctx, entry.packed);
+          if (!ctx.aborted && (scoreSide <= aspAlpha || scoreSide >= aspBeta)) {
+            scoreSide = -negamax(fb, depth - 1, -INF, INF, 1, 0, true, ctx, entry.packed);
+          }
+        } else {
+          scoreSide = -negamax(fb, depth - 1, -INF, INF, 1, 0, true, ctx, entry.packed);
+        }
       } else {
         // Compute exact lower threshold needed to beat bestSortScore even with book/jitter tie-breakers.
         // Also widen moves 1..2 slightly so Top-3 variations display accurate scores.
@@ -981,9 +1052,9 @@ export function analyzePosition(
           i < 3 ? Math.min(neededToBeat, bestRawScore - 55) : neededToBeat;
         const scoutAlpha = Math.max(-INF + 100, Math.min(INF - 100, scoutTarget));
 
-        scoreSide = -negamax(fb, depth - 1, -scoutAlpha - 1, -scoutAlpha, 1, 0, true, ctx);
+        scoreSide = -negamax(fb, depth - 1, -scoutAlpha - 1, -scoutAlpha, 1, 0, true, ctx, entry.packed);
         if (!ctx.aborted && scoreSide > scoutAlpha) {
-          scoreSide = -negamax(fb, depth - 1, -beta, -scoutAlpha, 1, 0, true, ctx);
+          scoreSide = -negamax(fb, depth - 1, -beta, -scoutAlpha, 1, 0, true, ctx, entry.packed);
           isExact = true;
         } else {
           // Fail-low upper bound: strictly worse than bestSortScore even after any static bonus!
@@ -1034,6 +1105,7 @@ export function analyzePosition(
       iterResults.sort((a, b) => b.sortScore - a.sortScore);
       completedOrder = iterResults;
       completedDepth = depth;
+      prevBestRawScore = completedOrder[0].scoreSide;
 
       // Immediate stop if we already found a forced checkmate!
       if (completedOrder[0].isExact && completedOrder[0].scoreSide >= MATE_THRESHOLD) {
@@ -1097,8 +1169,8 @@ export function analyzePosition(
   const bestRedScore = toRedScore(best.scoreSide);
   const afterBest = applyMoveOnGrid(state.grid, best.boardMove);
   const bestNotation = formatMoveVietnamese(state.grid, best.boardMove);
-  const killPattern = detectKillPattern(state.grid, afterBest, best.boardMove);
-  const motif = killPattern ? killPattern.nameVi : detectMoveMotif(state.grid, best.boardMove, afterBest);
+  const pvLine = extractPvLine(fb, state.grid, best.packed, 4);
+  const motif = detectMoveMotif(state.grid, best.boardMove, afterBest);
   const threats = findTacticalThreats(state.grid);
   const winProbRed = scoreToWinProbRed(bestRedScore);
 
@@ -1121,9 +1193,11 @@ export function analyzePosition(
     variations,
     threats,
     motif,
-    killPattern: killPattern ?? undefined,
     tacticalSummary: `${motif} · ${advantageText}`,
     searchDepth: completedDepth,
     positionKey,
+    pvLine,
+    nodesSearched: ctx.nodes,
+    elapsedMs: Math.max(1, Date.now() - startedAt),
   };
 }

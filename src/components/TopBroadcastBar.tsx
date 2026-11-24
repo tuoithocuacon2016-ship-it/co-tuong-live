@@ -10,6 +10,11 @@ import {
 import { Side } from '../engine/xiangqi';
 import { BOT_MASTER_PROFILE } from '../data/characters';
 import { ChallengerEntry } from '../engine/matchmaker';
+import {
+  PIECE_LABEL_MODES,
+  PIECE_THEMES,
+  PieceVisualConfig,
+} from '../scene/pieceStyle';
 
 interface TopBroadcastBarProps {
   activeChallenger: ChallengerEntry;
@@ -25,6 +30,11 @@ interface TopBroadcastBarProps {
   muted: boolean;
   tiktokFrame: boolean;
   viewerCount: number;
+  liveMode?: 'duel_1v1' | 'crowd_vote';
+  awaitingReadyCheck?: boolean;
+  pieceStyle: PieceVisualConfig;
+  onCyclePieceTheme: () => void;
+  onCyclePieceLabelMode: () => void;
   onToggleAnalysis: () => void;
   onToggleSplitScreen: () => void;
   onToggleMute: () => void;
@@ -46,6 +56,11 @@ export const TopBroadcastBar: React.FC<TopBroadcastBarProps> = ({
   muted,
   tiktokFrame,
   viewerCount,
+  liveMode = 'duel_1v1',
+  awaitingReadyCheck = false,
+  pieceStyle,
+  onCyclePieceTheme,
+  onCyclePieceLabelMode,
   onToggleAnalysis,
   onToggleSplitScreen,
   onToggleMute,
@@ -54,6 +69,9 @@ export const TopBroadcastBar: React.FC<TopBroadcastBarProps> = ({
 }) => {
   const scoreFormatted =
     score === 0 ? '0.0' : `${score > 0 ? '+' : ''}${(score / 100).toFixed(1)}`;
+  const activeThemeShort = PIECE_THEMES[pieceStyle.theme]?.shortLabel ?? 'Ngà Đỏ';
+  const activeLabelShort =
+    PIECE_LABEL_MODES.find((m) => m.id === pieceStyle.labelMode)?.shortLabel ?? 'Hán';
 
   return (
     <div
@@ -118,9 +136,13 @@ export const TopBroadcastBar: React.FC<TopBroadcastBarProps> = ({
                 ? 'CHIẾU TƯỚNG!'
                 : botThinking
                   ? 'Kỳ Ma suy tính'
-                  : turn === 'red'
-                    ? 'Đợi khách đi cờ'
-                    : 'Kỳ Ma xuất chiêu'}
+                  : liveMode === 'crowd_vote' && turn === 'red'
+                    ? 'Cả phòng bỏ phiếu'
+                    : awaitingReadyCheck && turn === 'red'
+                      ? 'Chờ khách điểm danh'
+                      : turn === 'red'
+                        ? 'Đợi khách đi cờ'
+                        : 'Kỳ Ma xuất chiêu'}
             </div>
           </div>
 
@@ -157,8 +179,36 @@ export const TopBroadcastBar: React.FC<TopBroadcastBarProps> = ({
         </div>
       </div>
 
-      {/* Right: Compact Square Utility Controls */}
-      <div className="pointer-events-auto flex items-center gap-1.5 shrink-0">
+      {/* Right: Compact Utility Controls (including 1-tap Mobile HD Piece Theme & Label Mode) */}
+      <div className="pointer-events-auto flex items-center gap-1 sm:gap-1.5 shrink-0">
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={(e) => {
+            e.currentTarget.blur();
+            onCyclePieceTheme();
+          }}
+          aria-label={`Đổi bộ quân cờ (${activeThemeShort})`}
+          title="Đổi màu quân cờ siêu nét cho điện thoại (Ngà Đỏ / Đỏ-Trắng / Sứ Trắng)"
+          className="px-2 h-9 rounded flex items-center gap-1 border bg-[#1c151c]/92 hover:bg-[#2b202b] text-[#fce7be] border-[#e5b864]/45 text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap"
+        >
+          <span>{activeThemeShort}</span>
+        </button>
+
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={(e) => {
+            e.currentTarget.blur();
+            onCyclePieceLabelMode();
+          }}
+          aria-label={`Đổi chữ trên quân cờ (${activeLabelShort})`}
+          title="Đổi kiểu chữ quân cờ (Hán lớn / Song ngữ H+V / Chữ Việt)"
+          className="px-2 h-9 rounded flex items-center border bg-[#182726]/92 hover:bg-[#233b39] text-[#c7f5ec] border-[#78d9ca]/45 text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap"
+        >
+          {activeLabelShort}
+        </button>
+
         <button
           type="button"
           tabIndex={-1}
@@ -169,7 +219,7 @@ export const TopBroadcastBar: React.FC<TopBroadcastBarProps> = ({
           aria-label={splitScreen ? 'Chuyển sang 1 màn hình toàn cảnh' : 'Chia 2 màn hình bàn cờ và zoom nhân vật'}
           aria-pressed={splitScreen}
           title={splitScreen ? 'Đang chia 2 màn hình (Bàn cờ + Zoom nhân vật)' : 'Bật chia 2 màn hình'}
-          className={`w-9 h-9 rounded flex items-center justify-center border transition-colors cursor-pointer ${
+          className={`hidden sm:flex w-9 h-9 rounded items-center justify-center border transition-colors cursor-pointer ${
             splitScreen
               ? 'bg-[#8f261f] text-[#fce7bc] border-[#e5b864]/65'
               : 'bg-[#141016]/90 text-[#bcae98] border-[#d4a44e]/25 hover:text-[#f7ecd6]'
@@ -188,7 +238,7 @@ export const TopBroadcastBar: React.FC<TopBroadcastBarProps> = ({
           aria-label={showAnalysis ? 'Tắt hiệu ứng phân tích kiếm ý' : 'Bật hiệu ứng phân tích kiếm ý'}
           aria-pressed={showAnalysis}
           title="Phân tích kiếm ý 3D"
-          className={`w-9 h-9 rounded flex items-center justify-center border transition-colors cursor-pointer ${
+          className={`hidden md:flex w-9 h-9 rounded items-center justify-center border transition-colors cursor-pointer ${
             showAnalysis
               ? 'bg-[#8f261f] text-[#fce7bc] border-[#e5b864]/65'
               : 'bg-[#141016]/90 text-[#bcae98] border-[#d4a44e]/25 hover:text-[#f7ecd6]'
@@ -207,7 +257,7 @@ export const TopBroadcastBar: React.FC<TopBroadcastBarProps> = ({
           aria-label={tiktokFrame ? 'Thoát khung phát Live TikTok 9:16' : 'Bật khung phát Live TikTok 9:16'}
           aria-pressed={tiktokFrame}
           title="Chế độ khung dọc TikTok Live 9:16 (Chuẩn OBS & TikTok Live Studio)"
-          className={`px-2.5 h-9 rounded flex items-center gap-1.5 border text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+          className={`px-2 sm:px-2.5 h-9 rounded flex items-center gap-1.5 border text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
             tiktokFrame
               ? 'bg-[#2a5450] text-[#e7fbf7] border-[#78d9ca]/70'
               : 'bg-[#1a151d]/92 text-[#f0d59a] border-[#d4a44e]/45 hover:bg-[#2a2130] hover:text-[#fff3d6]'

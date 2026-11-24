@@ -1,12 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Camera,
+  Check,
   Coffee,
   Copy,
+  Crown,
   Eye,
   Heart,
   Megaphone,
   MessageCircle,
+  Mic,
+  MicOff,
   Monitor,
   Pause,
   RefreshCw,
@@ -17,6 +21,8 @@ import {
   UserCheck,
   Volume2,
   VolumeX,
+  Vote,
+  X,
 } from 'lucide-react';
 import {
   BOT_MASTER_PROFILE,
@@ -25,9 +31,15 @@ import {
   matchGuestCharacter,
 } from '../data/characters';
 import { BotDifficulty, DeepAnalysisResult } from '../engine/ai';
+import { CrowdVoteEntry, LiveControlMode } from '../engine/liveInteraction';
 import { ChallengerEntry, CommentaryItem, LiveChatMessage } from '../engine/matchmaker';
 import { BoardState, Side } from '../engine/xiangqi';
 import { ZoomFocus } from '../scene/XiangqiStage';
+import {
+  PIECE_LABEL_MODES,
+  PIECE_THEMES,
+  PieceVisualConfig,
+} from '../scene/pieceStyle';
 import { BoardFocusSignal } from '../scene/portraitKinematics';
 import {
   ActionCuePayload,
@@ -86,6 +98,20 @@ interface TikTokLiveStudioOverlayProps {
 
   audienceWaveOn: boolean;
   onToggleAudienceWave: () => void;
+  autoCommentReply: boolean;
+  onToggleAutoCommentReply: () => void;
+  liveMode: LiveControlMode;
+  onSelectLiveMode: (mode: LiveControlMode) => void;
+  crowdTopVotes: CrowdVoteEntry[];
+  crowdTotalVotes: number;
+  onCommitCrowdVote: () => void;
+  voiceListening: boolean;
+  voiceInterimText: string;
+  pendingVoiceMove: { notation: string; transcript: string } | null;
+  onToggleVoiceListening: () => void;
+  onConfirmPendingVoiceMove: () => void;
+  onCancelPendingVoiceMove: () => void;
+  awaitingReadyCheck: boolean;
   onSubmitChat: (username: string, text: string) => void;
   onApplyGuestQuickMatch: (
     username: string,
@@ -96,6 +122,9 @@ interface TikTokLiveStudioOverlayProps {
   onPickFromQueue: (mode: 'fifo' | 'random' | string) => void;
   onResetMatch: () => void;
   onTestWebhook: () => void;
+  pieceStyle: PieceVisualConfig;
+  onCyclePieceTheme: () => void;
+  onCyclePieceLabelMode: () => void;
   onExitTikTokMode: () => void;
   onPause: () => void;
 }
@@ -162,11 +191,28 @@ export const TikTokLiveStudioOverlay: React.FC<TikTokLiveStudioOverlayProps> = (
   aiLoading,
   audienceWaveOn,
   onToggleAudienceWave,
+  autoCommentReply,
+  onToggleAutoCommentReply,
+  liveMode,
+  onSelectLiveMode,
+  crowdTopVotes,
+  crowdTotalVotes,
+  onCommitCrowdVote,
+  voiceListening,
+  voiceInterimText,
+  pendingVoiceMove,
+  onToggleVoiceListening,
+  onConfirmPendingVoiceMove,
+  onCancelPendingVoiceMove,
+  awaitingReadyCheck,
   onSubmitChat,
   onApplyGuestQuickMatch,
   onPickFromQueue,
   onResetMatch,
   onTestWebhook,
+  pieceStyle,
+  onCyclePieceTheme,
+  onCyclePieceLabelMode,
   onExitTikTokMode,
   onPause,
 }) => {
@@ -283,9 +329,13 @@ export const TikTokLiveStudioOverlay: React.FC<TikTokLiveStudioOverlayProps> = (
                 ? 'CHIẾU TƯỚNG!'
                 : botThinking
                   ? 'Kỳ Ma suy tính...'
-                  : turn === 'red'
-                    ? `Hiệp ${Math.floor(moveCount / 2) + 1} · Mời đi cờ`
-                    : `Hiệp ${Math.floor(moveCount / 2) + 1} · Kỳ Ma đánh`}
+                  : liveMode === 'crowd_vote'
+                    ? `Vote Cờ · ${crowdTotalVotes} phiếu`
+                    : awaitingReadyCheck
+                      ? 'Chờ khách điểm danh'
+                      : turn === 'red'
+                        ? `Hiệp ${Math.floor(moveCount / 2) + 1} · Mời đi cờ`
+                        : `Hiệp ${Math.floor(moveCount / 2) + 1} · Kỳ Ma đánh`}
             </span>
           </div>
 
@@ -357,6 +407,22 @@ export const TikTokLiveStudioOverlay: React.FC<TikTokLiveStudioOverlayProps> = (
             <div className="flex items-center gap-1 shrink-0">
               <button
                 type="button"
+                title="Đổi màu quân cờ siêu nét cho điện thoại"
+                onClick={onCyclePieceTheme}
+                className="px-1.5 py-0.5 rounded bg-[#271822] hover:bg-[#3a2232] text-[#fce7be] border border-[#e5b864]/45 text-[9px] font-semibold cursor-pointer whitespace-nowrap"
+              >
+                {PIECE_THEMES[pieceStyle.theme]?.shortLabel ?? 'Ngà Đỏ'}
+              </button>
+              <button
+                type="button"
+                title="Đổi kiểu chữ quân cờ (Hán / H+V / Việt)"
+                onClick={onCyclePieceLabelMode}
+                className="px-1.5 py-0.5 rounded bg-[#182927] hover:bg-[#233d3a] text-[#b9f4e9] border border-[#72c4b4]/45 text-[9px] font-semibold cursor-pointer whitespace-nowrap"
+              >
+                {PIECE_LABEL_MODES.find((m) => m.id === pieceStyle.labelMode)?.shortLabel ?? 'Hán'}
+              </button>
+              <button
+                type="button"
                 data-cinema-cue="sip_tea"
                 title="Uống trà ngắm trăng"
                 onClick={() => onTriggerActionCue('sip_tea', 'bride')}
@@ -392,9 +458,27 @@ export const TikTokLiveStudioOverlay: React.FC<TikTokLiveStudioOverlayProps> = (
           )}
         </div>
 
-        {/* 3. Lower TikTok Broadcast Zone: 2 Compact Floating Chat Lines + Commentary Subtitle
-               (Kept compact at very bottom so all 10 board ranks & 9..1 sit 100% clear above!) */}
+        {/* 3. Lower TikTok Broadcast Zone: Optional Crowd Vote Bar + 2 Compact Chat Lines + Commentary */}
         <div className="absolute bottom-2.5 left-2.5 right-14 z-20 flex flex-col gap-1 pointer-events-none">
+          {liveMode === 'crowd_vote' && crowdTopVotes.length > 0 && (
+            <div
+              className="px-2 py-1 rounded border border-[#78d9ca]/45 text-[10px] flex items-center gap-2 overflow-hidden"
+              style={{ backgroundColor: 'rgba(13, 30, 29, 0.88)' }}
+            >
+              <span className="text-[#8be8d9] font-semibold shrink-0">Vote ({crowdTotalVotes}):</span>
+              <div className="flex items-center gap-2 truncate font-mono-num">
+                {crowdTopVotes.slice(0, 3).map((v, i) => (
+                  <span
+                    key={v.notation}
+                    className={i === 0 ? 'text-[#fde4a8] font-bold' : 'text-[#cce6e1]'}
+                  >
+                    {v.notation} {v.percent}%
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex flex-col gap-0.5">
             {messages.slice(-2).map((m) => (
               <div
@@ -504,22 +588,98 @@ export const TikTokLiveStudioOverlay: React.FC<TikTokLiveStudioOverlayProps> = (
             className="flex-1 min-h-0 flex flex-col rounded border border-[#d4a44e]/30 p-3 shadow-xl"
             style={{ backgroundColor: 'rgba(14, 11, 16, 0.92)' }}
           >
-            <div className="flex items-center justify-between gap-2 pb-2 border-b border-[#d4a44e]/20">
-              <h2 className="text-xs font-semibold text-[#f2d699]">
+            <div className="flex items-center justify-between gap-1.5 pb-2 border-b border-[#d4a44e]/20">
+              <h2 className="text-xs font-semibold text-[#f2d699] truncate">
                 Khung Chat TikTok Live
               </h2>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={onToggleAutoCommentReply}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-medium cursor-pointer ${
+                    autoCommentReply
+                      ? 'bg-[#3b2514] text-[#fde4b4]'
+                      : 'bg-[#231d26] text-[#9b8d7a]'
+                  }`}
+                >
+                  Đọc Cmt
+                </button>
+                <button
+                  type="button"
+                  onClick={onToggleAudienceWave}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-medium cursor-pointer transition-colors ${
+                    audienceWaveOn
+                      ? 'bg-[#2a5450] text-[#d9f7f2]'
+                      : 'bg-[#231d26] text-[#b8aa95]'
+                  }`}
+                >
+                  {audienceWaveOn ? 'Fan: Bật' : 'Fan: Tắt'}
+                </button>
+              </div>
+            </div>
+
+            {/* Live Mode Switcher (1v1 Challenger vs Crowd Vote) + Voice Pending Confirm */}
+            <div className="pt-1.5 flex items-center justify-between gap-1">
               <button
                 type="button"
-                onClick={onToggleAudienceWave}
-                className={`px-2 py-0.5 rounded text-[10px] font-medium cursor-pointer transition-colors ${
-                  audienceWaveOn
-                    ? 'bg-[#2a5450] text-[#d9f7f2]'
-                    : 'bg-[#231d26] text-[#b8aa95]'
+                onClick={() =>
+                  onSelectLiveMode(liveMode === 'duel_1v1' ? 'crowd_vote' : 'duel_1v1')
+                }
+                className={`flex-1 py-1 px-2 rounded text-[10px] font-semibold border cursor-pointer flex items-center justify-center gap-1 ${
+                  liveMode === 'crowd_vote'
+                    ? 'bg-[#2a5450] text-[#e7fbf7] border-[#78d9ca]/60'
+                    : 'bg-[#211a24] text-[#f3dfb6] border-[#d4a44e]/30'
                 }`}
               >
-                {audienceWaveOn ? 'Khán giả: Bật' : 'Khán giả: Tắt'}
+                <Vote className="w-3 h-3" />
+                {liveMode === 'crowd_vote' ? 'Cả Phòng Vote' : '1v1 Người Chọn'}
               </button>
+              <button
+                type="button"
+                onClick={onToggleVoiceListening}
+                className={`py-1 px-2 rounded text-[10px] font-semibold border cursor-pointer flex items-center gap-1 ${
+                  voiceListening
+                    ? 'bg-[#2a5450] text-[#e7fbf7] border-[#78d9ca]/70'
+                    : 'bg-[#211a24] text-[#e6cfa3] border-[#d4a44e]/30'
+                }`}
+              >
+                {voiceListening ? <Mic className="w-3 h-3 text-[#7ef2df]" /> : <MicOff className="w-3 h-3" />}
+                {voiceListening ? 'Đang Nghe' : 'Mic Cờ'}
+              </button>
+              {liveMode === 'crowd_vote' && (
+                <button
+                  type="button"
+                  onClick={onCommitCrowdVote}
+                  className="py-1 px-2 rounded bg-[#8f261f] text-[#fdf4e3] text-[10px] font-semibold cursor-pointer"
+                >
+                  Chốt
+                </button>
+              )}
             </div>
+
+            {pendingVoiceMove && (
+              <div className="mt-1.5 px-2 py-1 rounded bg-[#2d1a1e] border border-[#e5b864]/65 text-[10px] flex items-center justify-between gap-1">
+                <span className="text-[#fce8be] truncate font-mono-num">
+                  Mic: {pendingVoiceMove.notation}
+                </span>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={onConfirmPendingVoiceMove}
+                    className="px-1.5 py-0.5 rounded bg-[#2a5450] text-[#e7fbf7] cursor-pointer"
+                  >
+                    <Check className="w-3 h-3" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onCancelPendingVoiceMove}
+                    className="px-1.5 py-0.5 rounded bg-[#4a1e24] text-[#ffd4cc] cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div
               ref={chatScrollRef}
@@ -579,15 +739,19 @@ export const TikTokLiveStudioOverlay: React.FC<TikTokLiveStudioOverlayProps> = (
                     value={chatUser}
                     onChange={(e) => setChatUser(e.target.value)}
                     placeholder="@NguoiChoi"
-                    className="w-28 px-2 py-1.5 rounded bg-[#1d1720] border border-[#d4a44e]/25 text-xs text-[#f2cb7e] focus:outline-none focus:border-[#e5b864]"
+                    className="w-24 px-2 py-1.5 rounded bg-[#1d1720] border border-[#d4a44e]/25 text-xs text-[#f2cb7e] focus:outline-none focus:border-[#e5b864]"
                   />
                   <input
                     type="text"
                     aria-label="Nhập nước đi qua chat Studio"
                     value={chatText}
                     onChange={(e) => setChatText(e.target.value)}
-                    placeholder="vd: x7 bình 3, p2 bình 5..."
-                    className="flex-1 min-w-0 px-2.5 py-1.5 rounded bg-[#1d1720] border border-[#d4a44e]/30 text-xs text-[#f6ebd7] focus:outline-none focus:border-[#e5b864]"
+                    placeholder={
+                      voiceListening && voiceInterimText
+                        ? `Nghe: "${voiceInterimText}"`
+                        : 'vd: p25, m87, pháo 2 vô 5...'
+                    }
+                    className="flex-1 min-w-0 px-2 py-1.5 rounded bg-[#1d1720] border border-[#d4a44e]/30 text-xs text-[#f6ebd7] focus:outline-none focus:border-[#e5b864]"
                   />
                   <button
                     type="submit"
@@ -609,18 +773,28 @@ export const TikTokLiveStudioOverlay: React.FC<TikTokLiveStudioOverlayProps> = (
             className="rounded border border-[#d4a44e]/30 p-3 shadow-xl flex flex-col gap-2"
             style={{ backgroundColor: 'rgba(14, 11, 16, 0.92)' }}
           >
-            <div className="flex items-center justify-between">
-              <h2 className="text-xs font-semibold text-[#f2d699]">
-                Khách Mời Nhanh (Nam/Nữ · Tuổi)
+            <div className="flex items-center justify-between gap-1">
+              <h2 className="text-xs font-semibold text-[#f2d699] truncate">
+                Khách Mời Nhanh ({queue.length})
               </h2>
               {queue.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => onPickFromQueue('random')}
-                  className="px-2 py-0.5 rounded bg-[#254542] hover:bg-[#305955] text-[#d6f5f0] text-[10px] font-medium cursor-pointer"
-                >
-                  Bốc Thăm ({queue.length})
-                </button>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => onPickFromQueue('fifo')}
+                    className="px-2 py-0.5 rounded bg-[#254542] hover:bg-[#305955] text-[#d6f5f0] text-[10px] font-medium cursor-pointer flex items-center gap-0.5"
+                  >
+                    {queue[0]?.isVip && <Crown className="w-2.5 h-2.5 text-[#f4c668]" />}
+                    Mời Kế
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onPickFromQueue('random')}
+                    className="px-1.5 py-0.5 rounded bg-[#2b2130] text-[#f3dfb6] text-[10px] font-medium cursor-pointer"
+                  >
+                    Quay
+                  </button>
+                </div>
               )}
             </div>
 

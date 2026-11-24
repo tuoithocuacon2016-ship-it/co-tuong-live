@@ -1,14 +1,21 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Camera,
+  Check,
   ChevronDown,
   ChevronUp,
+  Crown,
   MessageSquare,
+  Mic,
+  MicOff,
+  Radio,
   RefreshCw,
   Send,
   Sparkles,
   UserCheck,
   Users,
+  Vote,
+  X,
 } from 'lucide-react';
 import {
   GUEST_CHARACTER_ROSTER,
@@ -17,8 +24,14 @@ import {
   matchGuestCharacter,
 } from '../data/characters';
 import { BotDifficulty, DeepAnalysisResult } from '../engine/ai';
+import { CrowdVoteEntry, LiveControlMode } from '../engine/liveInteraction';
 import { ChallengerEntry, LiveChatMessage } from '../engine/matchmaker';
 import { CameraPreset, ZoomFocus } from '../scene/XiangqiStage';
+import {
+  PIECE_LABEL_MODES,
+  PIECE_THEME_LIST,
+  PieceVisualConfig,
+} from '../scene/pieceStyle';
 import { CommentaryVoiceName } from '../utils/wuxiaAudio';
 
 export type DockTab = 'chat' | 'guest' | 'analysis' | 'live';
@@ -29,16 +42,33 @@ interface BottomControlDockProps {
   activeTab: DockTab;
   onSelectTab: (tab: DockTab) => void;
 
-  // Chat & Move interaction
+  // Chat, Audience Interaction, Voice Listener & Crowd Vote
   messages: LiveChatMessage[];
   activeChallenger: ChallengerEntry;
   audienceWaveOn: boolean;
   onToggleAudienceWave: () => void;
+  autoCommentReply: boolean;
+  onToggleAutoCommentReply: () => void;
+  liveMode: LiveControlMode;
+  onSelectLiveMode: (mode: LiveControlMode) => void;
+  crowdTopVotes: CrowdVoteEntry[];
+  crowdTotalVotes: number;
+  onCommitCrowdVote: () => void;
+  voiceListening: boolean;
+  voiceInterimText: string;
+  pendingVoiceMove: { notation: string; transcript: string } | null;
+  onToggleVoiceListening: () => void;
+  onConfirmPendingVoiceMove: () => void;
+  onCancelPendingVoiceMove: () => void;
+  onReadSpotlightComment: () => void;
+  hasSpotlightComment: boolean;
   onSubmitChat: (username: string, text: string) => void;
   moveHintError: string | null;
 
   // Guest Quick Selector & Queue
   queue: ChallengerEntry[];
+  awaitingReadyCheck: boolean;
+  afkStrikes: number;
   onApplyGuestQuickMatch: (
     username: string,
     gender: GuestGender,
@@ -56,7 +86,9 @@ interface BottomControlDockProps {
   aiLoading: boolean;
   aiError: string | null;
 
-  // Camera & Live Studio
+  // Camera, Piece Style & Live Studio
+  pieceStyle: PieceVisualConfig;
+  onSelectPieceStyle: (style: PieceVisualConfig) => void;
   cameraPreset: CameraPreset;
   onSelectCamera: (preset: CameraPreset) => void;
   splitScreen: boolean;
@@ -96,9 +128,26 @@ export const BottomControlDock: React.FC<BottomControlDockProps> = ({
   activeChallenger,
   audienceWaveOn,
   onToggleAudienceWave,
+  autoCommentReply,
+  onToggleAutoCommentReply,
+  liveMode,
+  onSelectLiveMode,
+  crowdTopVotes,
+  crowdTotalVotes,
+  onCommitCrowdVote,
+  voiceListening,
+  voiceInterimText,
+  pendingVoiceMove,
+  onToggleVoiceListening,
+  onConfirmPendingVoiceMove,
+  onCancelPendingVoiceMove,
+  onReadSpotlightComment,
+  hasSpotlightComment,
   onSubmitChat,
   moveHintError,
   queue,
+  awaitingReadyCheck,
+  afkStrikes,
   onApplyGuestQuickMatch,
   onPickFromQueue,
   analysis,
@@ -108,6 +157,8 @@ export const BottomControlDock: React.FC<BottomControlDockProps> = ({
   onRequestAiCommentary,
   aiLoading,
   aiError,
+  pieceStyle,
+  onSelectPieceStyle,
   cameraPreset,
   onSelectCamera,
   splitScreen,
@@ -289,12 +340,74 @@ export const BottomControlDock: React.FC<BottomControlDockProps> = ({
             </div>
           </div>
 
-          {/* Dock Tab Content (fixed compact height ~168px so 3D Bot Face remains unobstructed) */}
-          <div className="h-[172px] p-3 flex flex-col justify-between overflow-hidden">
-            {/* TAB 1: TIKTOK LIVE CHAT & MOVE COMMANDS */}
+          {/* Dock Tab Content (compact ~192px height so 3D Bot Face remains unobstructed while fitting Crowd Vote / Voice banners cleanly) */}
+          <div className="h-[192px] p-2.5 flex flex-col justify-between overflow-hidden">
+            {/* TAB 1: TIKTOK LIVE CHAT, VOICE MOVE LISTENER & CROWD VOTE */}
             {activeTab === 'chat' && (
-              <div className="flex flex-col h-full gap-2">
-                <div className="flex items-start gap-3 flex-1 min-h-0">
+              <div className="flex flex-col h-full gap-1.5">
+                {/* Pending Voice Move Confirmation Strip OR Active Crowd Vote Tally Bar */}
+                {pendingVoiceMove ? (
+                  <div className="flex items-center justify-between gap-2 px-2.5 py-1 rounded bg-[#2d1a1e] border border-[#e5b864]/65 text-[11px] shrink-0">
+                    <span className="text-[#fce8be] truncate">
+                      Mic nghe: <strong className="font-mono-num">{pendingVoiceMove.notation}</strong>
+                      <span className="text-[#bfb099] ml-1.5">("{pendingVoiceMove.transcript}")</span>
+                    </span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={onConfirmPendingVoiceMove}
+                        className="px-2 py-0.5 rounded bg-[#2a5450] hover:bg-[#356a65] text-[#e7fbf7] text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
+                      >
+                        <Check className="w-3 h-3" />
+                        Đi Ngay
+                      </button>
+                      <button
+                        type="button"
+                        onClick={onCancelPendingVoiceMove}
+                        className="px-2 py-0.5 rounded bg-[#3b1e23] hover:bg-[#52272f] text-[#ffd4cc] text-[10px] font-medium flex items-center gap-0.5 cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                        Hủy
+                      </button>
+                    </div>
+                  </div>
+                ) : liveMode === 'crowd_vote' ? (
+                  <div className="flex items-center justify-between gap-2 px-2.5 py-1 rounded bg-[#182827] border border-[#78d9ca]/40 text-[11px] shrink-0">
+                    <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+                      <span className="text-[#91e8da] font-semibold whitespace-nowrap flex items-center gap-1">
+                        <Vote className="w-3 h-3" />
+                        Bình chọn ({crowdTotalVotes}):
+                      </span>
+                      {crowdTopVotes.length > 0 ? (
+                        <div className="flex items-center gap-2 truncate">
+                          {crowdTopVotes.map((v, i) => (
+                            <span
+                              key={v.notation}
+                              className={`font-mono-num whitespace-nowrap ${
+                                i === 0 ? 'text-[#fce5b1] font-semibold' : 'text-[#b7d6d0]'
+                              }`}
+                            >
+                              {v.notation} ({v.count})
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-[#a5c9c2] truncate">
+                          Khán giả gõ nước cờ (vd: p25, m87, pháo đầu) để bỏ phiếu!
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={onCommitCrowdVote}
+                      className="px-2 py-0.5 rounded bg-[#8f261f] hover:bg-[#ad3028] text-[#fdf4e3] text-[10px] font-semibold whitespace-nowrap shrink-0 cursor-pointer"
+                    >
+                      Chốt Phiếu
+                    </button>
+                  </div>
+                ) : null}
+
+                <div className="flex items-stretch gap-3 flex-1 min-h-0">
                   {/* Live Chat Feed */}
                   <div
                     ref={chatScrollRef}
@@ -328,39 +441,75 @@ export const BottomControlDock: React.FC<BottomControlDockProps> = ({
                     ))}
                   </div>
 
-                  {/* Right Compact Sample Commands & Audience Toggle */}
-                  <div className="w-[215px] shrink-0 hidden md:flex flex-col gap-1.5 border-l border-[#d4a44e]/15 pl-3">
-                    <div className="flex items-center justify-between text-[11px] text-[#b4a48b]">
-                      <span>Lệnh đi nhanh</span>
+                  {/* Right Compact Live Mode, Comment Reader & Quick Commands */}
+                  <div className="w-[244px] shrink-0 hidden md:flex flex-col justify-between gap-1 border-l border-[#d4a44e]/15 pl-3 h-full">
+                    <div className="flex items-center justify-between gap-1 text-[10px] leading-tight">
                       <button
                         type="button"
-                        onClick={onToggleAudienceWave}
-                        className={`px-2 py-0.5 rounded text-[10px] font-medium cursor-pointer transition-colors ${
-                          audienceWaveOn
-                            ? 'bg-[#2a5450] text-[#d9f7f2]'
-                            : 'bg-[#231d26] text-[#b8aa95] hover:text-[#f5e7cb]'
+                        onClick={() =>
+                          onSelectLiveMode(liveMode === 'duel_1v1' ? 'crowd_vote' : 'duel_1v1')
+                        }
+                        className={`px-2 py-0.5 rounded font-medium cursor-pointer transition-colors whitespace-nowrap ${
+                          liveMode === 'crowd_vote'
+                            ? 'bg-[#2a5450] text-[#d9f7f2] border border-[#78d9ca]/55'
+                            : 'bg-[#2a1d23] text-[#f4d498] border border-[#d4a44e]/30'
                         }`}
                       >
-                        {audienceWaveOn ? 'Khán giả: Bật' : 'Khán giả: Tắt'}
+                        {liveMode === 'crowd_vote' ? 'Mode: Cả Phòng Vote' : 'Mode: 1v1 Khách'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={onToggleAutoCommentReply}
+                        title="Kỳ Ma tự đọc bình luận hay và bắt bài khán giả mách nước"
+                        className={`px-2 py-0.5 rounded font-medium cursor-pointer transition-colors whitespace-nowrap ${
+                          autoCommentReply
+                            ? 'bg-[#3b2514] text-[#fde4b4] border border-[#e5b864]/45'
+                            : 'bg-[#231d26] text-[#9f917d] border border-transparent'
+                        }`}
+                      >
+                        Đọc Cmt: {autoCommentReply ? 'Bật' : 'Tắt'}
                       </button>
                     </div>
-                    <div className="grid grid-cols-2 gap-1">
+                    <div className="grid grid-cols-3 gap-1">
                       {SAMPLE_CHAT_MOVES.map((cmd) => (
                         <button
                           key={cmd}
                           type="button"
                           onClick={() => onSubmitChat(activeChallenger.username, cmd)}
-                          className="px-2 py-1 rounded bg-[#211b24] hover:bg-[#322736] text-[#efd8a8] font-mono-num text-[11px] text-left truncate border border-[#d4a44e]/20 cursor-pointer transition-colors"
+                          className="px-1.5 py-0.5 leading-tight rounded bg-[#211b24] hover:bg-[#322736] text-[#efd8a8] font-mono-num text-[10px] text-center truncate border border-[#d4a44e]/20 cursor-pointer transition-colors"
                         >
                           {cmd}
                         </button>
                       ))}
                     </div>
+                    <div className="flex items-center justify-between gap-1 text-[10px] leading-tight">
+                      <button
+                        type="button"
+                        onClick={onToggleAudienceWave}
+                        className={`flex-1 py-0.5 rounded font-medium cursor-pointer transition-colors ${
+                          audienceWaveOn
+                            ? 'bg-[#253b3a] text-[#cdeee8]'
+                            : 'bg-[#231d26] text-[#a59782]'
+                        }`}
+                      >
+                        {audienceWaveOn ? 'Khán giả: Bật' : 'Khán giả: Tắt'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={onReadSpotlightComment}
+                        disabled={!hasSpotlightComment}
+                        title="Kỳ Ma đọc & tương tác với bình luận khán giả nổi bật nhất"
+                        className="flex-1 py-0.5 rounded bg-[#2c1f29] hover:bg-[#3f2c3a] disabled:opacity-45 text-[#f3dfb6] font-medium cursor-pointer flex items-center justify-center gap-1"
+                      >
+                        <Radio className="w-2.5 h-2.5" />
+                        Đọc Cmt Hay
+                      </button>
+                    </div>
                   </div>
                 </div>
 
-                {/* Chat Input Bar */}
-                <form onSubmit={handleChatSubmit} className="flex items-center gap-2 shrink-0">
+                {/* Chat Input Bar + Voice Mic Move Listener */}
+                <form onSubmit={handleChatSubmit} className="flex items-center gap-1.5 shrink-0">
                   <label htmlFor="chat-sender-input" className="sr-only">
                     Tên người chat
                   </label>
@@ -370,7 +519,7 @@ export const BottomControlDock: React.FC<BottomControlDockProps> = ({
                     value={chatUser}
                     onChange={(e) => setChatUser(e.target.value)}
                     placeholder="@NguoiChoi"
-                    className="w-28 sm:w-36 px-2.5 py-1.5 rounded bg-[#1d1720] border border-[#d4a44e]/25 text-xs text-[#f2cb7e] placeholder:text-[#7c6f5e] focus:outline-none focus:border-[#e5b864]"
+                    className="w-20 sm:w-32 px-1.5 sm:px-2 py-1.5 rounded bg-[#1d1720] border border-[#d4a44e]/25 text-xs text-[#f2cb7e] placeholder:text-[#7c6f5e] focus:outline-none focus:border-[#e5b864] shrink-0"
                   />
                   <label htmlFor="chat-move-input" className="sr-only">
                     Nhập lệnh nước đi cờ tướng hoặc bình luận TikTok
@@ -380,12 +529,38 @@ export const BottomControlDock: React.FC<BottomControlDockProps> = ({
                     type="text"
                     value={chatText}
                     onChange={(e) => setChatText(e.target.value)}
-                    placeholder="Nhập nước đi qua chat: x7 bình 3, p2 bình 5, tiến 5, thoái 1, hoặc !choi..."
-                    className="flex-1 px-3 py-1.5 rounded bg-[#1d1720] border border-[#d4a44e]/30 text-xs text-[#f6ebd7] placeholder:text-[#867968] focus:outline-none focus:border-[#e5b864]"
+                    placeholder={
+                      voiceListening && voiceInterimText
+                        ? `Đang nghe: "${voiceInterimText}"...`
+                        : 'p25, m87, pháo 2 vô 5, xe ăn pháo, !choi, !hoaco, !goiy...'
+                    }
+                    className="flex-1 min-w-0 px-2 sm:px-2.5 py-1.5 rounded bg-[#1d1720] border border-[#d4a44e]/30 text-xs text-[#f6ebd7] placeholder:text-[#867968] focus:outline-none focus:border-[#e5b864]"
                   />
                   <button
+                    type="button"
+                    onClick={onToggleVoiceListening}
+                    aria-pressed={voiceListening}
+                    title={
+                      voiceListening
+                        ? 'Tắt Mic nghe nước đi (đang bật Echo-Guard)'
+                        : 'Bật Mic nghe nước đi bằng giọng nói tiếng Việt'
+                    }
+                    className={`px-2 sm:px-2.5 py-1.5 rounded text-xs font-semibold flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer border transition-colors ${
+                      voiceListening
+                        ? 'bg-[#2a5450] text-[#e7fbf7] border-[#78d9ca]/70'
+                        : 'bg-[#221b25] hover:bg-[#312636] text-[#e6cfa3] border-[#d4a44e]/30'
+                    }`}
+                  >
+                    {voiceListening ? (
+                      <Mic className="w-3.5 h-3.5 text-[#7ef2df]" />
+                    ) : (
+                      <MicOff className="w-3.5 h-3.5" />
+                    )}
+                    <span className="hidden sm:inline">{voiceListening ? 'Đang Nghe' : 'Mic Cờ'}</span>
+                  </button>
+                  <button
                     type="submit"
-                    className="px-3.5 py-1.5 rounded bg-[#a92620] hover:bg-[#c23029] text-[#fdf4e3] text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+                    className="px-2.5 sm:px-3 py-1.5 rounded bg-[#a92620] hover:bg-[#c23029] text-[#fdf4e3] text-xs font-semibold flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
                   >
                     <Send className="w-3.5 h-3.5" />
                     Gửi
@@ -482,13 +657,57 @@ export const BottomControlDock: React.FC<BottomControlDockProps> = ({
                   </button>
 
                   {queue.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => onPickFromQueue('random')}
-                      className="px-2.5 py-1 rounded bg-[#254542] hover:bg-[#2f5854] text-[#d6f5f0] text-xs font-medium whitespace-nowrap cursor-pointer ml-auto"
-                    >
-                      Bốc Thăm Hàng Đợi ({queue.length})
-                    </button>
+                    <div className="flex items-center gap-1 ml-auto">
+                      <button
+                        type="button"
+                        onClick={() => onPickFromQueue('fifo')}
+                        className="px-2.5 py-1 rounded bg-[#2a5450] hover:bg-[#336964] text-[#d6f5f0] text-xs font-medium whitespace-nowrap cursor-pointer"
+                      >
+                        Mời Người Kế ({queue.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onPickFromQueue('random')}
+                        className="px-2.5 py-1 rounded bg-[#2b2130] hover:bg-[#3b2d42] text-[#f3dfb6] text-xs font-medium whitespace-nowrap cursor-pointer border border-[#d4a44e]/30"
+                      >
+                        Bốc Thăm
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Queue Strip (VIP Fast-Track first) + Active Seat Status */}
+                <div className="flex items-center justify-between gap-2 text-[11px] text-[#c7b79e] shrink-0">
+                  <div className="flex items-center gap-2 min-w-0 truncate">
+                    <span>
+                      Đang đấu: <strong className="text-[#f38072]">{activeChallenger.username}</strong>
+                    </span>
+                    {awaitingReadyCheck && (
+                      <span className="text-[#f6d58e] font-semibold">· Đang chờ điểm danh</span>
+                    )}
+                    {afkStrikes > 0 && (
+                      <span className="text-[#ff8778] font-semibold">· Quá giờ {afkStrikes}/2</span>
+                    )}
+                  </div>
+                  {queue.length > 0 && (
+                    <div className="flex items-center gap-1 overflow-x-auto max-w-[55%]">
+                      {queue.slice(0, 4).map((q) => (
+                        <button
+                          key={q.id}
+                          type="button"
+                          onClick={() => onPickFromQueue(q.id)}
+                          title={`Mời ${q.username} lên đài ngay`}
+                          className={`px-2 py-0.5 rounded text-[10px] whitespace-nowrap cursor-pointer flex items-center gap-1 border ${
+                            q.isVip
+                              ? 'bg-[#3c2712] text-[#fde09e] border-[#e5b864]/65'
+                              : 'bg-[#1d1722] text-[#cfc1aa] border-[#d4a44e]/20 hover:border-[#d4a44e]/50'
+                          }`}
+                        >
+                          {q.isVip && <Crown className="w-2.5 h-2.5 text-[#f4c668]" />}
+                          <span>{q.username}</span>
+                        </button>
+                      ))}
+                    </div>
                   )}
                 </div>
 
@@ -577,14 +796,24 @@ export const BottomControlDock: React.FC<BottomControlDockProps> = ({
                   </div>
                 </div>
 
-                {/* Column 2: Active Threats & Tactical Summary */}
+                {/* Column 2: Active Threats, Principal Variation Line & Tactical Summary */}
                 <div className="flex flex-col gap-1.5 min-h-0 border-l border-[#d4a44e]/15 pl-3">
-                  <div className="text-[11px] font-semibold text-[#d9b673]">
-                    Sát Khí & Mối Đe Dọa
+                  <div className="text-[11px] font-semibold text-[#d9b673] flex items-center justify-between gap-2">
+                    <span>Sát Khí & Mối Đe Dọa</span>
+                    {analysis?.searchDepth ? (
+                      <span className="font-mono-num text-[10px] text-[#8fd9cb] font-normal">
+                        Độ sâu {analysis.searchDepth}
+                      </span>
+                    ) : null}
                   </div>
                   <div className="text-xs text-[#e5d9c3] leading-snug">
                     {analysis?.tacticalSummary ?? 'Đang quét thế cờ trên kỳ đài...'}
                   </div>
+                  {analysis?.pvLine && analysis.pvLine.length > 1 && (
+                    <div className="text-[10px] font-mono-num text-[#f2d699] truncate">
+                      Biến chính: {analysis.pvLine.join(' → ')}
+                    </div>
+                  )}
                   <div className="flex-1 overflow-y-auto wuxia-scroll space-y-1 text-[11px] text-[#c5b59d]">
                     {analysis && analysis.threats.length > 0 ? (
                       analysis.threats.map((t, i) => (
@@ -637,10 +866,10 @@ export const BottomControlDock: React.FC<BottomControlDockProps> = ({
             {/* TAB 4: CAMERA ANGLES & TIKTOK LIVE WEBHOOK BRIDGE */}
             {activeTab === 'live' && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 h-full">
-                {/* Split-Screen & Camera Presets */}
-                <div className="flex flex-col gap-1.5">
+                {/* Split-Screen, Piece Clarity Style & Camera Presets */}
+                <div className="flex flex-col justify-between gap-1.5">
                   <div className="flex items-center justify-between text-[11px] font-semibold text-[#d9b673]">
-                    <span>Bố Cục & Góc Máy 3D</span>
+                    <span>Quân Cờ Siêu Nét & Góc Máy</span>
                     <button
                       type="button"
                       onClick={onToggleSplitScreen}
@@ -653,20 +882,54 @@ export const BottomControlDock: React.FC<BottomControlDockProps> = ({
                       {splitScreen ? '2 Màn Hình: Bật' : '1 Màn Hình'}
                     </button>
                   </div>
-                  <div className="grid grid-cols-2 gap-1.5">
+                  <div className="grid grid-cols-3 gap-1">
+                    {PIECE_THEME_LIST.map((theme) => (
+                      <button
+                        key={theme.id}
+                        type="button"
+                        onClick={() => onSelectPieceStyle({ ...pieceStyle, theme: theme.id })}
+                        title={theme.description}
+                        className={`py-1 px-1.5 rounded text-[10px] font-medium border cursor-pointer transition-colors truncate ${
+                          pieceStyle.theme === theme.id
+                            ? 'bg-[#8f261f] text-[#fdf4e3] border-[#e5b864]/70'
+                            : 'bg-[#1a151e] text-[#c7b9a4] border-[#d4a44e]/20 hover:text-[#f7ecd6]'
+                        }`}
+                      >
+                        {theme.shortLabel}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-3 gap-1">
+                    {PIECE_LABEL_MODES.map((lm) => (
+                      <button
+                        key={lm.id}
+                        type="button"
+                        onClick={() => onSelectPieceStyle({ ...pieceStyle, labelMode: lm.id })}
+                        title={lm.label}
+                        className={`py-1 px-1.5 rounded text-[10px] font-medium border cursor-pointer transition-colors truncate ${
+                          pieceStyle.labelMode === lm.id
+                            ? 'bg-[#2a5450] text-[#e7fbf7] border-[#78d9ca]/65'
+                            : 'bg-[#1a151e] text-[#c7b9a4] border-[#d4a44e]/20 hover:text-[#f7ecd6]'
+                        }`}
+                      >
+                        Chữ: {lm.shortLabel}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-4 gap-1">
                     {(
                       [
-                        { id: 'liveBot', label: 'Live Mặt Bot' },
-                        { id: 'duel', label: 'Thư Hùng 2 Bên' },
-                        { id: 'board', label: 'Toàn Bàn Cờ' },
-                        { id: 'guest', label: 'Khách Mời 3D' },
+                        { id: 'liveBot', label: 'Mặt Bot' },
+                        { id: 'duel', label: 'Thư Hùng' },
+                        { id: 'board', label: 'Toàn Bàn' },
+                        { id: 'guest', label: 'Khách' },
                       ] as const
                     ).map((cam) => (
                       <button
                         key={cam.id}
                         type="button"
                         onClick={() => onSelectCamera(cam.id)}
-                        className={`py-1.5 px-2.5 rounded text-xs font-medium border cursor-pointer transition-colors whitespace-nowrap ${
+                        className={`py-1 px-1.5 rounded text-[10px] font-medium border cursor-pointer transition-colors whitespace-nowrap truncate ${
                           cameraPreset === cam.id
                             ? 'bg-[#8f261f] text-[#fdf4e3] border-[#e5b864]/65'
                             : 'bg-[#1a151e] text-[#c7b9a4] border-[#d4a44e]/20 hover:text-[#f7ecd6]'

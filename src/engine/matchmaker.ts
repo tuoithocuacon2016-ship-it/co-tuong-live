@@ -16,6 +16,8 @@ export interface ChallengerEntry {
   age: number;
   character: WuxiaCharacterProfile;
   joinedAt: number;
+  isVip?: boolean;
+  giftCount?: number;
 }
 
 export interface LiveChatMessage {

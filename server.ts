@@ -441,6 +441,195 @@ app.post('/api/commentary', async (req: Request, res: Response) => {
   }
 });
 
+// Server-side Hybrid Gemini NLU Move Resolver: maps natural-language Vietnamese
+// ("đẩy con tốt giữa lên đi em", "lấy xe bên phải chiếu") strictly to a LEGAL move index!
+app.post('/api/parse-move', async (req: Request, res: Response) => {
+  const ai = getGeminiClient();
+  if (!ai) {
+    res.json({ ok: false, moveIndex: null, reason: 'no_api_key' });
+    return;
+  }
+
+  const rawMessage = String(req.body?.message ?? '').trim().slice(0, 140);
+  const legalMoves = Array.isArray(req.body?.legalMoves) ? req.body.legalMoves : [];
+  if (!rawMessage || legalMoves.length === 0) {
+    res.status(400).json({ ok: false, moveIndex: null });
+    return;
+  }
+
+  const compactList = legalMoves
+    .slice(0, 90)
+    .map(
+      (m: {
+        index: number;
+        notation: string;
+        pieceVi: string;
+        fromFile: number;
+        toFile: number;
+        capturedVi?: string;
+        givesCheck?: boolean;
+      }) =>
+        `#${m.index}: ${m.notation} (${m.pieceVi} cột ${m.fromFile}->${m.toFile}${
+          m.capturedVi ? `, ăn ${m.capturedVi}` : ''
+        }${m.givesCheck ? ', CHIẾU' : ''})`,
+    )
+    .join('\n');
+
+  const prompt = [
+    `Câu nói/chat của người chơi cờ tướng (quân Đỏ, cột 1 bên phải -> cột 9 bên trái): "${rawMessage}"`,
+    'Danh sách nước đi HỢP LỆ hiện tại:',
+    compactList,
+    'Nhiệm vụ: Nếu câu trên thực sự là yêu cầu đi 1 nước cờ cụ thể trong danh sách, trả về moveIndex đúng. Nếu câu chỉ là chat xã giao (không phải đi cờ) hoặc không khớp nước nào, trả về moveIndex = -1. Nếu mơ hồ giữa 2-3 nước, trả về moveIndex = -1 và liệt kê ambiguousIndices.',
+  ].join('\n');
+
+  const plans: Array<{ model: string; thinkingLevel: ThinkingLevel }> = [
+    { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.LOW },
+    { model: 'gemini-3.1-flash-lite', thinkingLevel: ThinkingLevel.MINIMAL },
+  ];
+
+  for (const plan of plans) {
+    try {
+      const response = await ai.models.generateContent({
+        model: plan.model,
+        contents: prompt,
+        config: {
+          systemInstruction:
+            'Bạn là bộ phân giải lệnh cờ tướng Việt Nam siêu chuẩn. Tuyệt đối CHỈ chọn số index có trong danh sách nước hợp lệ, không bao giờ tự bịa nước.',
+          thinkingConfig: { thinkingLevel: plan.thinkingLevel },
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              moveIndex: {
+                type: Type.INTEGER,
+                description: 'Chỉ số index của nước hợp lệ khớp nhất, hoặc -1 nếu không phải nước đi / mơ hồ.',
+              },
+              ambiguousIndices: {
+                type: Type.ARRAY,
+                items: { type: Type.INTEGER },
+                description: 'Tối đa 3 chỉ số index nếu câu nói khớp nhiều quân khác nhau.',
+              },
+            },
+            required: ['moveIndex'],
+          },
+        },
+      });
+
+      const parsed = JSON.parse((response.text ?? '{}').trim());
+      const idx = typeof parsed.moveIndex === 'number' ? parsed.moveIndex : -1;
+      const validIdx = idx >= 0 && idx < legalMoves.length ? idx : null;
+      const amb = Array.isArray(parsed.ambiguousIndices)
+        ? parsed.ambiguousIndices.filter(
+            (n: unknown) => typeof n === 'number' && n >= 0 && n < legalMoves.length,
+          )
+        : [];
+      res.json({ ok: true, moveIndex: validIdx, ambiguousIndices: amb.slice(0, 3) });
+      return;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (/503|UNAVAILABLE|429|RESOURCE_EXHAUSTED/i.test(msg)) {
+        await new Promise((r) => setTimeout(r, 180));
+        continue;
+      }
+      break;
+    }
+  }
+
+  res.json({ ok: false, moveIndex: null });
+});
+
+// Server-side Live Audience / Challenger / Backseat-Coach Interactive Reply
+app.post('/api/live-reply', async (req: Request, res: Response) => {
+  const ai = getGeminiClient();
+  if (!ai) {
+    res.json({ ok: false, fallback: 'engine' });
+    return;
+  }
+
+  const kind = String(req.body?.kind ?? 'viewer_spotlight');
+  const speakerName = String(req.body?.speakerName ?? 'khách quý').replace(/^@/, '').slice(0, 36);
+  const messageText = String(req.body?.messageText ?? '').trim().slice(0, 150);
+  const challengerName = String(req.body?.challengerName ?? 'chàng').replace(/^@/, '').slice(0, 36);
+  const guestGender = req.body?.guestGender === 'nu' ? 'nu' : 'nam';
+  const guestAge = typeof req.body?.guestAge === 'number' ? req.body.guestAge : 26;
+  const suggestedNotation = String(req.body?.suggestedNotation ?? '').slice(0, 24);
+  const winProbRed = typeof req.body?.winProbRed === 'number' ? req.body.winProbRed : 50;
+  const pronouns = resolvePronounProfile(guestGender, guestAge);
+
+  if (!messageText) {
+    res.status(400).json({ ok: false, error: 'Thiếu nội dung tin nhắn.' });
+    return;
+  }
+
+  const scenario =
+    kind === 'backseat_coach'
+      ? `Khán giả "${speakerName}" vừa định mách nước cờ (${suggestedNotation}) cho ${pronouns.guest} "${challengerName}" trong khung chat: "${messageText}". Hãy bắt quả tang và trêu ghẹo duyên dáng!`
+      : kind === 'challenger_banter'
+        ? `Chính người đang đấu trên đài (${pronouns.guest} "${challengerName}") vừa nhắn trò chuyện trong lúc đánh cờ (tỷ lệ thắng của ${pronouns.guest}: ${winProbRed}%): "${messageText}". Hãy đối đáp ngọt ngào, sắc sảo và nhắc nhẹ hạ quân!`
+        : `Khán giả phòng live "${speakerName}" vừa bình luận: "${messageText}". Hãy gọi tên "${speakerName}" và tương tác cực kỳ cuốn hút với phòng live (giữ bầu không khí đêm hoa chúc đánh cờ dưới trăng hồ sen)!`;
+
+  const plans: Array<{ model: string; thinkingLevel: ThinkingLevel }> = [
+    { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.LOW },
+    { model: 'gemini-3.1-flash-lite', thinkingLevel: ThinkingLevel.MINIMAL },
+  ];
+
+  for (const plan of plans) {
+    try {
+      const response = await ai.models.generateContent({
+        model: plan.model,
+        contents: scenario,
+        config: {
+          systemInstruction:
+            `Bạn là Kỳ Ma Điêu Nguyệt — mỹ nhân hỷ phục đỏ phượng quan vàng đang livestream đánh cờ tướng dưới ánh trăng hồ sen. ` +
+            `Xưng hô: tự xưng "${pronouns.self}", gọi người đang đấu "${pronouns.guest}", gọi khán giả "${pronouns.audience}". ` +
+            'Viết 1 câu phản hồi cực kỳ tự nhiên, duyên dáng, có dấu ngắt nhịp ("...", "—", "!", "?"), độ dài 14–24 từ tiếng Việt thuần túy, KHÔNG emoji, KHÔNG ngoặc kép, KHÔNG đọc ký hiệu cờ khô khan.',
+          thinkingConfig: { thinkingLevel: plan.thinkingLevel },
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              line: { type: Type.STRING, description: 'Câu đối đáp 14–24 từ tiếng Việt giàu cảm xúc.' },
+              emotion: { type: Type.STRING, description: 'Một trong: calm, amused, thinking, surprised, fierce.' },
+              gesture: { type: Type.STRING, description: 'Một trong: sip_tea, tease, think_fan, closeup_talk.' },
+              stageDirection: { type: Type.STRING, description: 'Mô tả cử chỉ ngắn 5–9 chữ.' },
+            },
+            required: ['line', 'emotion', 'gesture', 'stageDirection'],
+          },
+        },
+      });
+
+      const parsed = JSON.parse((response.text ?? '{}').trim());
+      const cleanLine = String(parsed.line ?? '')
+        .replace(/<[^>]+>/g, '')
+        .replace(/["“”]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (!cleanLine) throw new Error('Empty live reply');
+
+      const emotion = VALID_EMOTIONS.has(parsed.emotion) ? String(parsed.emotion) : 'amused';
+      const gesture = VALID_GESTURES.has(parsed.gesture) ? String(parsed.gesture) : 'closeup_talk';
+      res.json({
+        ok: true,
+        line: cleanLine,
+        emotion,
+        emotionLabel: EMOTION_LABEL_MAP[emotion] ?? 'Trêu chọc',
+        gesture,
+        stageDirection: String(parsed.stageDirection ?? 'Mỉm cười giao lưu cùng phòng live').slice(0, 64),
+      });
+      return;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (/503|UNAVAILABLE|429|RESOURCE_EXHAUSTED/i.test(msg)) {
+        await new Promise((r) => setTimeout(r, 180));
+        continue;
+      }
+      break;
+    }
+  }
+
+  res.json({ ok: false, fallback: 'engine' });
+});
+
 // Server-side Single-Speaker Consistent Gemini TTS (gemini-3.8-flash-lite-tts)
 const VALID_VOICES = new Set(['Charon', 'Fenrir', 'Kore', 'Puck', 'Zephyr']);
 

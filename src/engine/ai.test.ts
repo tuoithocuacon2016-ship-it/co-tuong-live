@@ -293,3 +293,46 @@ test('Zero-blunder 10-ply Grandmaster opening & early-midgame self-play stays ba
   }
 });
 
+test('Core AI upgrades: Aspiration Windows + Countermove + Principal Variation (pvLine) & telemetry', () => {
+  // Rich midgame tactical board (out of opening book!) so Aspiration Windows & TT PV extraction execute fully
+  const midgame = buildBoard(
+    [
+      { r: 0, c: 4, side: 'black', type: 'king' },
+      { r: 0, c: 3, side: 'black', type: 'advisor' },
+      { r: 1, c: 4, side: 'black', type: 'advisor' },
+      { r: 2, c: 2, side: 'black', type: 'horse' },
+      { r: 2, c: 6, side: 'black', type: 'horse' },
+      { r: 0, c: 1, side: 'black', type: 'chariot' },
+      { r: 3, c: 8, side: 'black', type: 'chariot' },
+      { r: 2, c: 4, side: 'black', type: 'cannon' },
+      { r: 3, c: 4, side: 'black', type: 'soldier' },
+      { r: 9, c: 4, side: 'red', type: 'king' },
+      { r: 9, c: 5, side: 'red', type: 'advisor' },
+      { r: 8, c: 4, side: 'red', type: 'advisor' },
+      { r: 7, c: 2, side: 'red', type: 'horse' },
+      { r: 7, c: 6, side: 'red', type: 'horse' },
+      { r: 8, c: 0, side: 'red', type: 'chariot' },
+      { r: 6, c: 7, side: 'red', type: 'chariot' },
+      { r: 7, c: 4, side: 'red', type: 'cannon' },
+      { r: 6, c: 4, side: 'red', type: 'soldier' },
+    ],
+    'black',
+    18,
+  );
+
+  const res = analyzePosition(midgame, 'cao_thu', { mode: 'play' });
+  assert.ok(res.bestMove, 'Midgame search should find a legal move');
+  assert.ok((res.searchDepth ?? 0) >= 4, `Expected depth >= 4, got ${res.searchDepth}`);
+  assert.ok(
+    Array.isArray(res.pvLine) && res.pvLine.length >= 2,
+    `Expected multi-ply Principal Variation (pvLine), got ${JSON.stringify(res.pvLine)}`,
+  );
+  assert.equal(res.pvLine[0], res.bestNotation, 'PV line must start with the best move notation');
+  assert.ok(
+    (res.nodesSearched ?? 0) > 100,
+    `Expected nodesSearched telemetry > 100, got ${res.nodesSearched}`,
+  );
+  assert.ok(typeof res.elapsedMs === 'number' && res.elapsedMs >= 0);
+});
+
+

@@ -21,6 +21,12 @@ import {
   createXiangqiBoardTextures,
 } from './textures';
 import {
+  DEFAULT_PIECE_STYLE,
+  PIECE_THEMES,
+  PieceVisualConfig,
+} from './pieceStyle';
+import { computeResponsiveBoardCamera } from './boardCamera';
+import {
   AnimatedWuxiaRig,
   CharacterMood,
   createBotMaster3D,
@@ -108,8 +114,11 @@ export class XiangqiStage {
 
   private readonly pieceVisuals = new Map<string, PieceVisual>();
   private readonly pieceFaceTextures = new Map<string, THREE.CanvasTexture>();
+  private pieceStyle: PieceVisualConfig = { ...DEFAULT_PIECE_STYLE };
   private readonly pieceBodyGeo: THREE.LatheGeometry;
   private readonly pieceTopGeo: THREE.CircleGeometry;
+  private readonly pieceShadowGeo: THREE.CircleGeometry;
+  private readonly pieceShadowMat: THREE.MeshBasicMaterial;
   private readonly redBodyMat: THREE.MeshStandardMaterial;
   private readonly blackBodyMat: THREE.MeshStandardMaterial;
   private readonly selectedRing: THREE.Mesh;
@@ -265,31 +274,45 @@ export class XiangqiStage {
     this.scene.add(this.piecesGroup);
     this.scene.add(this.legalDotsGroup);
 
-    // 7. Shared LatheGeometry & PBR Materials for 32 Xiangqi Pieces
-    const pieceRadius = Math.min(CELL_W, CELL_D) * 0.43;
+    // 7. Shared LatheGeometry, Grounded Contact Shadow & Zero-Glare PBR Materials for 32 Xiangqi Pieces
+    const pieceRadius = Math.min(CELL_W, CELL_D) * 0.468;
     const lathePts = [
       new THREE.Vector2(0.001, 0),
       new THREE.Vector2(pieceRadius * 0.94, 0),
       new THREE.Vector2(pieceRadius, 0.03),
-      new THREE.Vector2(pieceRadius, 0.115),
-      new THREE.Vector2(pieceRadius * 0.91, 0.155),
+      new THREE.Vector2(pieceRadius, 0.118),
+      new THREE.Vector2(pieceRadius * 0.945, 0.155),
       new THREE.Vector2(0.001, 0.155),
     ];
-    this.pieceBodyGeo = new THREE.LatheGeometry(lathePts, 24);
-    this.pieceTopGeo = new THREE.CircleGeometry(pieceRadius * 0.89, 24);
+    this.pieceBodyGeo = new THREE.LatheGeometry(lathePts, 28);
+    this.pieceTopGeo = new THREE.CircleGeometry(pieceRadius * 0.942, 28);
+    this.pieceShadowGeo = new THREE.CircleGeometry(pieceRadius * 1.14, 24);
+    const pieceShadowTex = createContactShadowTexture();
+    this.pieceShadowMat = new THREE.MeshBasicMaterial({
+      map: pieceShadowTex,
+      transparent: true,
+      opacity: 0.44,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+    });
+    const initTheme = PIECE_THEMES[this.pieceStyle.theme];
     this.redBodyMat = new THREE.MeshStandardMaterial({
-      color: 0x991218,
-      roughness: 0.22,
-      metalness: 0.14,
+      color: initTheme.red.bodyColorHex,
+      roughness: 0.34,
+      metalness: 0.08,
     });
     this.blackBodyMat = new THREE.MeshStandardMaterial({
-      color: 0x16141e,
-      roughness: 0.26,
-      metalness: 0.28,
+      color: initTheme.black.bodyColorHex,
+      roughness: 0.36,
+      metalness: 0.14,
     });
     this.disposables.push(
       this.pieceBodyGeo,
       this.pieceTopGeo,
+      this.pieceShadowGeo,
+      pieceShadowTex,
+      this.pieceShadowMat,
       this.redBodyMat,
       this.blackBodyMat,
     );
@@ -678,21 +701,62 @@ export class XiangqiStage {
   }
 
   private getPieceFaceTexture(side: Side, type: PieceType): THREE.CanvasTexture {
-    const key = `${side}_${type}`;
+    const key = `${this.pieceStyle.theme}_${this.pieceStyle.labelMode}_${side}_${type}`;
     let tex = this.pieceFaceTextures.get(key);
     if (!tex) {
       tex = createPieceFaceTexture(
         side,
         type,
         this.renderer.capabilities.getMaxAnisotropy(),
+        this.pieceStyle,
       );
       this.pieceFaceTextures.set(key, tex);
     }
     return tex;
   }
 
+  /**
+   * Live hot-swap for piece colorway (Ngà Đỏ / Đỏ-Trắng / Sứ Trắng) & label mode (Hán / H+V / Việt).
+   * Disposes old texture cache cleanly to keep GPU memory flat.
+   */
+  public setPieceStyle(nextStyle: PieceVisualConfig) {
+    if (
+      nextStyle.theme === this.pieceStyle.theme &&
+      nextStyle.labelMode === this.pieceStyle.labelMode
+    ) {
+      return;
+    }
+    this.pieceStyle = { ...nextStyle };
+
+    const themeSpec = PIECE_THEMES[this.pieceStyle.theme] ?? PIECE_THEMES.ivory_crimson;
+    this.redBodyMat.color.setHex(themeSpec.red.bodyColorHex);
+    this.blackBodyMat.color.setHex(themeSpec.black.bodyColorHex);
+
+    const oldTextures = Array.from(this.pieceFaceTextures.values());
+    this.pieceFaceTextures.clear();
+
+    for (const vis of this.pieceVisuals.values()) {
+      const faceMat = vis.group.userData?.faceMat as THREE.MeshStandardMaterial | undefined;
+      if (faceMat) {
+        faceMat.map = this.getPieceFaceTexture(vis.piece.side, vis.piece.type);
+        faceMat.needsUpdate = true;
+      }
+    }
+
+    for (const tex of oldTextures) {
+      tex.dispose();
+    }
+  }
+
   private createPieceMesh(piece: Piece): THREE.Group {
     const g = new THREE.Group();
+
+    // Soft radial contact shadow directly beneath piece for unmistakable figure-ground separation
+    const shadow = new THREE.Mesh(this.pieceShadowGeo, this.pieceShadowMat);
+    shadow.rotation.x = -Math.PI / 2;
+    shadow.position.y = 0.008;
+    g.add(shadow);
+
     const body = new THREE.Mesh(
       this.pieceBodyGeo,
       piece.side === 'red' ? this.redBodyMat : this.blackBodyMat,
@@ -702,15 +766,20 @@ export class XiangqiStage {
     g.add(body);
 
     const faceTex = this.getPieceFaceTexture(piece.side, piece.type);
+    // Matte-ceramic zero-glare PBR top face: prevents ACESFilmic specular washout on mobile screens!
     const faceMat = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       map: faceTex,
-      roughness: 0.36,
-      metalness: 0.08,
+      roughness: 0.92,
+      metalness: 0.0,
+      envMapIntensity: 0.16,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
     });
     const face = new THREE.Mesh(this.pieceTopGeo, faceMat);
     face.rotation.x = -Math.PI / 2;
-    face.position.y = 0.157;
+    face.position.y = 0.16;
     g.add(face);
     g.userData = { faceMat };
     return g;
@@ -950,50 +1019,40 @@ export class XiangqiStage {
   }
 
   private getPresetCameraVectors(preset: CameraPreset): { pos: THREE.Vector3; target: THREE.Vector3 } {
-    // TikTok Vertical 9:16 Mode: bottom 58% pane frames ALL 10 ranks + 9..1 file numbers
-    // lifted cleanly ABOVE the bottom 2-line chat & commentary subtitle box!
-    if (this.tiktokMode && (preset === 'liveBot' || preset === 'board')) {
-      return {
-        pos: _desiredCamPos.set(0, 7.65, 4.15),
-        target: _desiredTarget.set(0, 0.88, 0.92),
-      };
+    const w = this.viewportWidth;
+    const h = this.viewportHeight;
+
+    let paneW = w;
+    let paneH = h;
+    let layoutMode: 'tiktok' | 'split_desktop' | 'split_mobile' | 'single' = 'single';
+
+    if (this.tiktokMode) {
+      const { boardGl } = this.getTikTokVerticalLayout(w, h);
+      paneW = boardGl.w;
+      paneH = boardGl.h;
+      layoutMode = 'tiktok';
+    } else if (this.splitScreen) {
+      const split = this.getSplitLayout(w, h);
+      paneW = split.boardGl.w;
+      paneH = split.boardGl.h;
+      layoutMode = split.isNarrow ? 'split_mobile' : 'split_desktop';
     }
 
-    // Widescreen 2-Screen Split Mode: Left 60% pane frames ALL 10 ranks + 9..1 file numbers
-    // cleanly BETWEEN TopBroadcastBar and BottomControlDock with generous margins!
-    if (this.splitScreen && (preset === 'liveBot' || preset === 'board')) {
-      return {
-        pos: _desiredCamPos.set(0, 9.05, 5.05),
-        target: _desiredTarget.set(0, 0.88, 0.78),
-      };
-    }
+    const pose = computeResponsiveBoardCamera({
+      paneWidth: paneW,
+      paneHeight: paneH,
+      fovDeg: this.camera.fov,
+      layoutMode,
+      preset,
+      boardWorldW: BOARD_WORLD_W,
+      boardWorldD: BOARD_WORLD_D,
+      boardTopY: BOARD_TOP_Y,
+    });
 
-    switch (preset) {
-      case 'liveBot':
-        // Elevated Hero Broadcast angle over carved rosewood board & glowing temple lanterns
-        return {
-          pos: _desiredCamPos.set(0, 5.85, 4.35),
-          target: _desiredTarget.set(0, 0.88, 0.45),
-        };
-      case 'duel':
-        // Dramatic martial-arts side-angle showcase across the carved board
-        return {
-          pos: _desiredCamPos.set(5.4, 3.45, 2.2),
-          target: _desiredTarget.set(0, 0.95, 0),
-        };
-      case 'board':
-        // High-precision overhead 3/4 tactical view over full 9x10 Xiangqi board
-        return {
-          pos: _desiredCamPos.set(0, 7.45, 3.15),
-          target: _desiredTarget.set(0, 0.88, 0.1),
-        };
-      case 'guest':
-        // Low dramatic challenger POV looking across the Red army toward Black palace
-        return {
-          pos: _desiredCamPos.set(0, 3.65, 5.15),
-          target: _desiredTarget.set(0, 0.92, -0.35),
-        };
-    }
+    return {
+      pos: _desiredCamPos.set(pose.posX, pose.posY, pose.posZ),
+      target: _desiredTarget.set(pose.targetX, pose.targetY, pose.targetZ),
+    };
   }
 
   private handlePointerDown = (e: PointerEvent) => {
@@ -1060,6 +1119,9 @@ export class XiangqiStage {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
+    if (!this.isTitleMode && !this.userControllingCamera) {
+      this.transitionCamera = true;
+    }
   }
 
   private afterDraw(cb: () => void) {
