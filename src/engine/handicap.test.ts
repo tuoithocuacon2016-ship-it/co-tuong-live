@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   CONCESSION_LINE_VI,
+  EVEN_CONCESSION,
   HANDICAP_IDS,
   HANDICAP_LADDER,
   afterOwnerPly,
@@ -9,14 +10,23 @@ import {
   concessionBlock,
   concessionLegalMoves,
   createConcessionState,
+  flankForRung,
   handicapFor,
+  offersFlankChoice,
+  openConcession,
+  parseConcession,
+  pickGuestMove,
+  readConcessionFromSearch,
   resolveHandicap,
+  serializeConcession,
+  takesBothFlanks,
 } from './handicap';
 import type { Flank, HandicapId } from './handicap';
 import {
   cloneGrid,
   createInitialBoard,
   generateLegalMoves,
+  isInCheck,
   makeMove,
 } from './xiangqi';
 import type { BoardState, Move, Piece, Side } from './xiangqi';
@@ -525,4 +535,193 @@ test('the URL only ever selects a rung the ladder offers', () => {
     id: 'khong_chap',
     flank: 'ben_trai',
   });
+});
+
+test('a shield blocks greed, never survival', () => {
+  // The position that looks able to strand the clock: Black's cannon checking down file 5 over the
+  // iron soldier. The engine refuses that capture on its own - the piece that takes the soldier just
+  // becomes the screen - so the concession costs a checked guest nothing at all.
+  const { board: conceded, state } = setup(
+    edited([
+      [
+        [2, 7],
+        [1, 4],
+      ],
+      [
+        [6, 4],
+        [6, 3],
+      ],
+      [
+        [9, 1],
+        [4, 2],
+      ],
+    ]),
+    'chap_mot_ma',
+    'ben_phai',
+  );
+  assert.ok(isInCheck(conceded.grid, 'red'), 'the fixture is meant to be a cannon check through the soldier');
+  const all = generateLegalMoves(conceded.grid, 'red');
+  assert.ok(all.length > 0, 'a guest in check still has an answer to find');
+  assert.ok(
+    !all.some((m) => m.captured && m.to.row === 3 && m.to.col === 4),
+    'taking the iron soldier may not even be legal here',
+  );
+  assert.equal(
+    concessionLegalMoves(conceded, state, all).length,
+    all.length,
+    'under check the concession refuses nothing that was playable',
+  );
+
+  // The same horse, the same soldier, no check: now it is the shield doing the work.
+  const { board: calm, state: calmState } = setup(
+    edited([
+      [
+        [6, 4],
+        [6, 3],
+      ],
+      [
+        [9, 1],
+        [4, 2],
+      ],
+    ]),
+    'chap_mot_ma',
+    'ben_phai',
+  );
+  assert.ok(!isInCheck(calm.grid, 'red'));
+  assert.equal(concessionBlock(calm, calmState, guest(calm, [4, 2], [3, 4]))?.rule, 'thiet_binh');
+});
+
+test('the move played for the guest is always one the concession allows', () => {
+  const { board: conceded, state } = setup(
+    edited([
+      [
+        [9, 0],
+        [4, 4],
+      ],
+      [
+        [9, 8],
+        [4, 2],
+      ],
+      [
+        [2, 1],
+        [1, 4],
+      ],
+    ]),
+    'chap_mot_ma',
+    'ben_phai',
+  );
+  const centre = guest(conceded, [4, 4], [3, 4]);
+  const flank = guest(conceded, [4, 2], [3, 2]);
+
+  assert.equal(pickGuestMove(conceded, state, [centre, flank], centre)?.to.col, 2, 'a blocked favourite falls to the next playable move');
+  assert.equal(pickGuestMove(conceded, state, [flank, centre], flank), flank, 'an allowed favourite is kept');
+  assert.equal(pickGuestMove(conceded, state, [flank]), flank, 'no favourite is still a move');
+  assert.equal(
+    pickGuestMove(conceded, state, [centre], centre),
+    null,
+    'nothing playable is reported as nothing, never played anyway',
+  );
+  assert.equal(pickGuestMove(conceded, state, [], null), null);
+});
+
+test('the rung comes from the link or from storage, and nothing else can break it', () => {
+  assert.deepEqual(readConcessionFromSearch('?chap=chap_mot_xe&flank=9', null), {
+    id: 'chap_mot_xe',
+    flank: 'ben_phai',
+  });
+  assert.deepEqual(readConcessionFromSearch('chap=chap_mot_ma&flank=ca_hai', null), {
+    id: 'chap_mot_ma',
+    flank: 'ca_hai',
+  });
+  assert.deepEqual(readConcessionFromSearch('', 'chap_hai_ma|ben_phai'), {
+    id: 'chap_hai_ma',
+    flank: 'ben_phai',
+  });
+  // The link wins, but only when it names a rung the ladder offers.
+  assert.deepEqual(readConcessionFromSearch('?chap=chap_hai_xe', 'chap_mot_ma|ben_phai'), {
+    id: 'chap_mot_ma',
+    flank: 'ben_phai',
+  });
+  // An unreadable link and an unreadable store together are the even game, never a broken board.
+  assert.deepEqual(readConcessionFromSearch('?chap=chap_mot_phao', 'not-a-rung'), {
+    id: 'chap_mot_phao',
+    flank: 'ben_trai',
+  });
+  assert.deepEqual(readConcessionFromSearch('', 'junk|junk'), EVEN_CONCESSION);
+  assert.deepEqual(readConcessionFromSearch('', null), EVEN_CONCESSION);
+  assert.deepEqual(
+    parseConcession(serializeConcession({ id: 'chap_mot_ma', flank: 'ben_phai' })),
+    { id: 'chap_mot_ma', flank: 'ben_phai' },
+  );
+});
+
+test('the opening is laid once, board and ledger together', () => {
+  const laid = openConcession({ id: 'chap_mot_xe', flank: 'ben_phai' });
+  assert.ok(laid.ok);
+  assert.equal(laid.board.grid[0][8], null, 'the conceded chariot is off the array');
+  assert.deepEqual(
+    laid.state.handicap.removed.map((target) => target.at),
+    [{ row: 0, col: 8 }],
+  );
+  assert.equal(laid.board.moveCount, 0);
+  assert.deepEqual(laid.state.straightChariots, [], 'the ledger starts with nothing earned');
+  assert.equal(laid.board.refereeHistory?.length, 1);
+
+  const even = openConcession(EVEN_CONCESSION);
+  assert.equal(countPieces(even.board.grid).total, 32);
+  assert.deepEqual(even.state.handicap.shields, []);
+  assert.equal(even.state.handicap.rank, 0);
+});
+
+test('让双马 is the only rung taken from both flanks, and it carries 不出林车 with it', () => {
+  const both = handicapFor('chap_mot_ma', 'ca_hai');
+  assert.equal(both.removed.length, 2);
+  assert.equal(both.nameVi, 'Chấp Hai Mã');
+  assert.deepEqual(both.shields, ['thiet_binh', 'xuat_lin_xe'], 'the protection follows the empty files');
+  assert.deepEqual(both.vacatedHorseCols, [1, 7]);
+  assert.equal(both.costMg, handicapFor('chap_hai_ma').costMg);
+  assert.ok(takesBothFlanks('chap_mot_ma'));
+
+  // 让双车 and 让双炮 are on nobody's ladder, so "both" cannot ask for them.
+  for (const id of ['chap_mot_phao', 'chap_mot_xe'] as const) {
+    assert.equal(handicapFor(id, 'ca_hai').removed.length, 1, `${id} stays a single stone`);
+    assert.ok(!takesBothFlanks(id));
+  }
+  assert.ok(!takesBothFlanks('khong_chap'));
+});
+
+test('every rung fits the control bar chip it is chosen from', () => {
+  assert.deepEqual(
+    HANDICAP_LADDER.map((handicap) => handicap.shortVi),
+    ['Không chấp', '1 Mã', '1 Pháo', '2 Mã', '1 Xe'],
+  );
+  for (const handicap of HANDICAP_LADDER) {
+    assert.ok(handicap.shortVi.length <= 12, `${handicap.id} is too long for a chip`);
+    assert.ok(!/[{}`]/.test(handicap.shortVi), `${handicap.id} leaked a token into a chip`);
+  }
+});
+
+test('a rung chip never keeps a flank the new rung cannot take', () => {
+  // The control bar carries the flank choice across when the operator changes rung. That is only
+  // honest while the pairing exists: 让双炮 and 让双车 are not folk rules, so "both" has to fall
+  // back to the left flank rather than light up a chip for an array the ladder does not offer.
+  assert.deepEqual(
+    HANDICAP_IDS.map((id) => flankForRung(id, 'ca_hai')),
+    ['ben_trai', 'ca_hai', 'ca_hai', 'ben_trai', 'ben_trai'],
+  );
+  assert.equal(flankForRung('chap_mot_xe', 'ben_phai'), 'ben_phai');
+  assert.deepEqual(
+    HANDICAP_IDS.filter(offersFlankChoice),
+    ['chap_mot_ma', 'chap_mot_phao', 'chap_mot_xe'],
+  );
+  for (const id of HANDICAP_IDS) {
+    for (const flank of ['ben_trai', 'ben_phai', 'ca_hai'] as Flank[]) {
+      const rung = handicapFor(id, flankForRung(id, flank));
+      if (rung.gives && rung.gives !== 'horse') {
+        assert.equal(rung.removed.length, 1, `${id} asked for ${flank} took ${rung.removed.length}`);
+      }
+      // A flank row that is hidden must also be a row nothing can be misread from.
+      assert.equal(offersFlankChoice(id), rung.removed.length === 1 || id === 'chap_mot_ma', id);
+    }
+  }
 });

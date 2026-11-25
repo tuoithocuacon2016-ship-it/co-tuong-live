@@ -10,7 +10,6 @@ import {
   Move,
   PIECE_NAME_VI,
   applyMoveOnGrid,
-  createInitialBoard,
   generateLegalMoves,
   generateLegalMovesForSquare,
   isInCheck,
@@ -75,6 +74,19 @@ import {
   nightBookFavour,
   resolveNightTheme,
 } from './engine/nightThemes';
+import {
+  CONCESSION_STORAGE_KEY,
+  ConcessionChoice,
+  EVEN_CONCESSION,
+  ShieldKind,
+  afterOwnerPly,
+  concessionBlock,
+  concessionLegalMoves,
+  openConcession,
+  pickGuestMove,
+  readConcessionFromSearch,
+  serializeConcession,
+} from './engine/handicap';
 import { refereeForBoard } from './engine/repetitionReferee';
 import {
   CrowdVoteState,
@@ -135,6 +147,15 @@ const VALID_PIECE_THEMES = new Set<PieceThemeId>([
 ]);
 const VALID_LABEL_MODES = new Set<PieceLabelMode>(['han', 'han_viet', 'viet']);
 
+/** Tonight's rung on the concession ladder: the link outranks whatever the last broadcast left over. */
+function loadSavedConcession(): ConcessionChoice {
+  if (typeof window === 'undefined') return EVEN_CONCESSION;
+  return readConcessionFromSearch(
+    window.location.search,
+    window.localStorage.getItem(CONCESSION_STORAGE_KEY),
+  );
+}
+
 function loadSavedPieceStyle(): PieceVisualConfig {
   if (typeof window === 'undefined') return DEFAULT_PIECE_STYLE;
   try {
@@ -181,10 +202,15 @@ export default function App() {
   const [appState, setAppState] = useState<AppState>(() =>
     checkAutostart() ? 'playing' : 'title',
   );
-  const [board, setBoard] = useState<BoardState>(() => createInitialBoard());
+  const [concession, setConcession] = useState<ConcessionChoice>(loadSavedConcession);
+  // The conceded array and the ledger that tracks its shields are laid together, once, before the
+  // first stone is touched - a board and a rule set that disagree is the failure this avoids.
+  const [initialOpening] = useState(() => openConcession(concession));
+  const [board, setBoard] = useState<BoardState>(() => initialOpening.board);
   const [analysis, setAnalysis] = useState<DeepAnalysisResult>(() =>
-    analyzePosition(createInitialBoard(), 'cao_thu', { mode: 'preview' }),
+    analyzePosition(initialOpening.board, 'cao_thu', { mode: 'preview' }),
   );
+  const concessionRef = useRef(initialOpening.state);
   const [moveHistory, setMoveHistory] = useState<string[]>([]);
 
   const [activeChallenger, setActiveChallenger] =
@@ -529,6 +555,103 @@ export default function App() {
     [dispatchGestureCue, recordRecentLine, triggerBotSpeaking],
   );
 
+  const lastConcessionSpokenAtRef = useRef<number>(0);
+  const concessionClaimTimerRef = useRef<number | null>(null);
+
+  /**
+   * The gate every Red door runs through: a stone tonight's concession protects stays where it is,
+   * and the rule is said out loud rather than the move played and then walked back.
+   */
+  const refuseConcessionMove = useCallback(
+    (blocked: { rule: ShieldKind }) => {
+      const guest = activeChallengerRef.current;
+      const script = buildLiveInteractionScript({
+        kind: 'concession_refused',
+        shield: blocked.rule,
+        challengerName: guest.username,
+        guestGender: guest.gender,
+        guestAge: guest.age,
+        recentLines: recentLinesRef.current,
+      });
+      setMoveHintError(script.line);
+      appendMessage({ username: BOT_MASTER_PROFILE.name, text: script.line, kind: 'system' });
+      const now = Date.now();
+      if (now - lastConcessionSpokenAtRef.current > 5000 && speakingEngineRef.current === null) {
+        lastConcessionSpokenAtRef.current = now;
+        performScriptBeat(script, { notation: 'Lệ Chấp Quân' });
+      }
+    },
+    [appendMessage, performScriptBeat],
+  );
+
+  /** Tonight's rung in the bride's own words, said after whatever else just opened the game. */
+  const speakConcessionClaim = useCallback(
+    (delayMs = 0) => {
+      const handicap = concessionRef.current.handicap;
+      if (handicap.rank === 0) return;
+      const guest = activeChallengerRef.current;
+      const script = buildLiveInteractionScript({
+        kind: 'concession_claim',
+        concessionClaim: handicap.claimVi,
+        challengerName: guest.username,
+        guestGender: guest.gender,
+        guestAge: guest.age,
+        recentLines: recentLinesRef.current,
+      });
+      appendMessage({
+        username: BOT_MASTER_PROFILE.name,
+        text: `${handicap.nameVi} — ${script.line}`,
+        kind: 'system',
+      });
+      if (concessionClaimTimerRef.current) window.clearTimeout(concessionClaimTimerRef.current);
+      const token = turnSeqRef.current;
+      concessionClaimTimerRef.current = window.setTimeout(() => {
+        concessionClaimTimerRef.current = null;
+        if (turnSeqRef.current !== token) return;
+        performScriptBeat(script, { notation: handicap.nameVi });
+      }, delayMs);
+    },
+    [appendMessage, performScriptBeat],
+  );
+
+  /**
+   * Re-lay the board for a new rung. Only before the first stone: mid-game the choice is recorded and
+   * waits for the next duel, because withdrawing a piece once the referee has seen the array would
+   * contradict the position ledger.
+   */
+  const handleSelectConcession = useCallback(
+    (next: ConcessionChoice) => {
+      setConcession(next);
+      window.localStorage.setItem(CONCESSION_STORAGE_KEY, serializeConcession(next));
+      const setup = openConcession(next);
+      if (boardRef.current.moveCount > 0) {
+        appendMessage({
+          username: BOT_MASTER_PROFILE.name,
+          text: `Đã ghi ${setup.handicap.nameVi} cho ván sau — hạ quân rồi thì không rút chấp lại được đâu ${activeChallengerRef.current.username} ơi!`,
+          kind: 'system',
+        });
+        return;
+      }
+      const freshAnalysis = analyzePosition(setup.board, difficultyRef.current, {
+        mode: 'preview',
+      });
+      concessionRef.current = setup.state;
+      prevScoreRef.current = freshAnalysis.score;
+      prevWinProbRedRef.current = freshAnalysis.winProbRed;
+      setBoard(setup.board);
+      boardRef.current = setup.board;
+      setAnalysis(freshAnalysis);
+      setSelectedSquare(null);
+      setPreferredPieceId(null);
+      setMoveHistory([]);
+      stageRef.current?.syncBoard(setup.board, null, false);
+      stageRef.current?.setSelectionOverlay(null, []);
+      stageRef.current?.updateAnalysisVisuals(setup.board, freshAnalysis, showAnalysis, null);
+      speakConcessionClaim();
+    },
+    [appendMessage, showAnalysis, speakConcessionClaim],
+  );
+
   const requestEmotionalGeminiCommentary = useCallback(
     async (params: {
       notation: string;
@@ -675,8 +798,20 @@ export default function App() {
       },
     ) => {
       const currentBoard = boardRef.current;
+      if (side === 'red') {
+        const refusal = concessionBlock(currentBoard, concessionRef.current, move);
+        if (refusal) {
+          refuseConcessionMove(refusal);
+          return;
+        }
+      }
       const notation = formatMoveVietnamese(currentBoard.grid, move);
       const nextBoard = makeMove(currentBoard, move);
+      if (side === 'black') {
+        // The bride's own plies are what the shield ledger watches: 出林车 only ever exists for one
+        // ply, so every Black move has to pass through it, whatever door the search chose it from.
+        concessionRef.current = afterOwnerPly(concessionRef.current, move);
+      }
 
       setBoard(nextBoard);
       boardRef.current = nextBoard;
@@ -1089,6 +1224,7 @@ export default function App() {
       dispatchGestureCue,
       performScriptBeat,
       recordRecentLine,
+      refuseConcessionMove,
       requestEmotionalGeminiCommentary,
       showAnalysis,
       triggerBotSpeaking,
@@ -1164,7 +1300,13 @@ export default function App() {
   // Hybrid Gemini NLU Fallback: resolves complex natural-language moves ("đẩy tốt giữa lên", "lấy xe bên phải chiếu")
   const resolveMoveWithGeminiNlu = useCallback(
     async (username: string, rawText: string, snapshotBoard: BoardState) => {
-      const legal = generateLegalMoves(snapshotBoard.grid, 'red');
+      // The model is offered only the moves tonight's concession allows, and data.moveIndex is read
+      // back against this same filtered array - the two lists must never be allowed to disagree.
+      const legal = concessionLegalMoves(
+        snapshotBoard,
+        concessionRef.current,
+        generateLegalMoves(snapshotBoard.grid, 'red'),
+      );
       if (legal.length === 0) return;
 
       const payloadMoves = legal.map((mv, index) => {
@@ -1616,16 +1758,28 @@ export default function App() {
       // If clicking a legal target of the already-selected Red piece, execute move!
       if (prevSel) {
         const legal = generateLegalMovesForSquare(current.grid, prevSel.row, prevSel.col);
-        const match = legal.find((m) => m.to.row === row && m.to.col === col);
+        const playable = concessionLegalMoves(current, concessionRef.current, legal);
+        const match = playable.find((m) => m.to.row === row && m.to.col === col);
         if (match) {
           commitMove(match, activeChallengerRef.current.username, 'red');
+          return;
+        }
+        // Tapping a protected stone is the one door worth answering out loud: the guest aimed at it.
+        const aimed = legal.find((m) => m.to.row === row && m.to.col === col);
+        const refusal = aimed ? concessionBlock(current, concessionRef.current, aimed) : null;
+        if (refusal) {
+          refuseConcessionMove(refusal);
           return;
         }
       }
 
       // Otherwise select Red piece and highlight its legal moves (soft pickup tap NEVER stops voice!)
       if (clickedPiece && clickedPiece.side === 'red') {
-        const legal = generateLegalMovesForSquare(current.grid, row, col);
+        const legal = concessionLegalMoves(
+          current,
+          concessionRef.current,
+          generateLegalMovesForSquare(current.grid, row, col),
+        );
         wuxiaAudio.playPieceSelect();
         setSelectedSquare({ row, col });
         setPreferredPieceId(clickedPiece.id);
@@ -1644,7 +1798,7 @@ export default function App() {
         stageRef.current?.setSelectionOverlay(null, []);
       }
     },
-    [commitMove],
+    [commitMove, refuseConcessionMove],
   );
 
   const handleSquareClickRef = useRef(handleSquareClick);
@@ -1819,31 +1973,44 @@ export default function App() {
     ) {
       return;
     }
-    const tally = tallyCrowdVotes(crowdVoteRef.current, 3);
+    // A vote for a protected stone is counted in the chat but cannot win: the room chooses, the
+    // concession rules, and the runner-up takes the trick.
+    const tally = tallyCrowdVotes(crowdVoteRef.current, 3).filter(
+      (ballot) => concessionBlock(liveBoard, concessionRef.current, ballot.move) === null,
+    );
     const winner = tally[0];
-    const fallbackMove = analysisRef.current.bestMove ?? generateLegalMoves(liveBoard.grid, 'red')[0];
-    const chosenMove = winner?.move ?? fallbackMove;
+    const chosenMove =
+      winner?.move ??
+      pickGuestMove(
+        liveBoard,
+        concessionRef.current,
+        generateLegalMoves(liveBoard.grid, 'red'),
+        analysisRef.current.bestMove,
+      );
     if (!chosenMove) return;
 
     const notation = winner?.notation ?? formatMoveVietnamese(liveBoard.grid, chosenMove);
-    const total = crowdVoteRef.current.totalVotes;
     setCrowdVote(createEmptyCrowdVote());
     setTurnSecondsLeft(18);
 
     const guest = activeChallengerRef.current;
-    if (total > 0) {
+    if (winner) {
       const announce = buildLiveInteractionScript({
         kind: 'crowd_vote_commit',
         challengerName: guest.username,
         guestGender: guest.gender,
         guestAge: guest.age,
         suggestedNotation: notation,
-        voteCount: winner?.count ?? total,
+        voteCount: winner.count,
         recentLines: recentLinesRef.current,
       });
       performScriptBeat(announce, { notation: `Vote: ${notation}` });
     }
-    commitMove(chosenMove, total > 0 ? `Cả Phòng Live (${winner?.count ?? total} phiếu)` : 'Kiếm Ý Khán Giả', 'red');
+    commitMove(
+      chosenMove,
+      winner ? `Cả Phòng Live (${winner.count} phiếu)` : 'Kiếm Ý Khán Giả',
+      'red',
+    );
   }, [commitMove, performScriptBeat]);
 
   const handleReadSpotlightComment = useCallback(() => {
@@ -2082,8 +2249,13 @@ export default function App() {
     } else if (clockAction.type === 'afk_auto_move_warn') {
       setAfkStrikes(clockAction.nextStrikes);
       setTurnSecondsLeft(45);
-      const bestRed =
-        analysisRef.current.bestMove ?? generateLegalMoves(boardRef.current.grid, 'red')[0];
+      const timeoutBoard = boardRef.current;
+      const bestRed = pickGuestMove(
+        timeoutBoard,
+        concessionRef.current,
+        generateLegalMoves(timeoutBoard.grid, 'red'),
+        analysisRef.current.bestMove,
+      );
       if (bestRed) {
         const autoScript = buildLiveInteractionScript({
           kind: 'afk_auto_move',
@@ -2164,8 +2336,9 @@ export default function App() {
         recentLines: recentLinesRef.current,
       });
       performScriptBeat(opening, { moveNumber: 0, notation: 'Khai Đài Live' });
+      speakConcessionClaim(3800);
     },
-    [performScriptBeat],
+    [performScriptBeat, speakConcessionClaim],
   );
 
   const handleResetMatch = useCallback(() => {
@@ -2175,7 +2348,11 @@ export default function App() {
       window.clearTimeout(gestureChoreoTimerRef.current);
       gestureChoreoTimerRef.current = null;
     }
-    const fresh = createInitialBoard();
+    // A new duel re-lays the conceded array: the rung is a pre-game gift, so it is reset with the
+    // stones, and the shield ledger starts against exactly the board the referee is about to see.
+    const nextOpening = openConcession(concession);
+    concessionRef.current = nextOpening.state;
+    const fresh = nextOpening.board;
     const freshAnalysis = analyzePosition(fresh, difficultyRef.current, { mode: 'preview' });
     prevScoreRef.current = freshAnalysis.score;
     prevWinProbRedRef.current = freshAnalysis.winProbRed;
@@ -2221,7 +2398,9 @@ export default function App() {
     });
     performScriptBeat(resetBeat, { moveNumber: 0, notation: 'Khai Cuộc Mới' });
     wuxiaAudio.playGuzhengSweep();
-  }, [performScriptBeat, showAnalysis]);
+    // She says the opening first, then what she is giving away - one voice, two lines, in that order.
+    speakConcessionClaim(3800);
+  }, [concession, performScriptBeat, showAnalysis, speakConcessionClaim]);
 
   const handleSelectCamera = useCallback((preset: CameraPreset) => {
     setCameraPreset(preset);
@@ -2771,6 +2950,8 @@ export default function App() {
             onSelectPieceStyle={setPieceStyle}
             difficulty={difficulty}
             onSelectDifficulty={setDifficulty}
+            concession={concession}
+            onSelectConcession={handleSelectConcession}
             voiceEnabled={voiceEnabled}
             onToggleVoice={handleToggleVoice}
             voiceName={voiceName}

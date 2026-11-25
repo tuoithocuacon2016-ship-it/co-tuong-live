@@ -24,6 +24,14 @@ import {
   matchGuestCharacter,
 } from '../data/characters';
 import { BotDifficulty, DeepAnalysisResult } from '../engine/ai';
+import {
+  ConcessionChoice,
+  Flank,
+  HANDICAP_LADDER,
+  flankForRung,
+  offersFlankChoice,
+  takesBothFlanks,
+} from '../engine/handicap';
 import { CrowdVoteEntry, LiveControlMode } from '../engine/liveInteraction';
 import { ChallengerEntry, LiveChatMessage } from '../engine/matchmaker';
 import { CameraPreset, ZoomFocus } from '../scene/XiangqiStage';
@@ -99,6 +107,9 @@ interface BottomControlDockProps {
   onSelectZoomFocus: (focus: ZoomFocus) => void;
   difficulty: BotDifficulty;
   onSelectDifficulty: (diff: BotDifficulty) => void;
+  /** Tonight's rung on the 让子 ladder - the bride's own stones, chosen before the first ply. */
+  concession: ConcessionChoice;
+  onSelectConcession: (next: ConcessionChoice) => void;
   voiceEnabled: boolean;
   onToggleVoice: () => void;
   voiceName: CommentaryVoiceName;
@@ -109,6 +120,12 @@ interface BottomControlDockProps {
   onResetMatch: () => void;
   onTestWebhook: () => void;
 }
+
+const CONCESSION_FLANKS: { id: Flank; label: string }[] = [
+  { id: 'ben_trai', label: 'Chấp trái' },
+  { id: 'ben_phai', label: 'Chấp phải' },
+  { id: 'ca_hai', label: 'Cả hai bên' },
+];
 
 const SAMPLE_CHAT_MOVES = [
   'p2 bình 5',
@@ -169,6 +186,8 @@ export const BottomControlDock: React.FC<BottomControlDockProps> = ({
   onSelectZoomFocus,
   difficulty,
   onSelectDifficulty,
+  concession,
+  onSelectConcession,
   voiceEnabled,
   onToggleVoice,
   voiceName,
@@ -1014,6 +1033,47 @@ export const BottomControlDock: React.FC<BottomControlDockProps> = ({
                       </button>
                     ))}
                   </div>
+                  <div className="flex items-center gap-1">
+                    {HANDICAP_LADDER.map((rung) => (
+                      <button
+                        key={rung.id}
+                        type="button"
+                        title={rung.nameVi}
+                        onClick={() =>
+                          onSelectConcession({ id: rung.id, flank: flankForRung(rung.id, concession.flank) })
+                        }
+                        className={`flex-1 py-1 rounded text-[10px] font-medium border cursor-pointer transition-colors ${
+                          concession.id === rung.id
+                            ? 'bg-[#8f261f] text-[#fdf4e3] border-[#e5b864]/60'
+                            : 'bg-[#1a151e] text-[#b9ab96] border-[#d4a44e]/20 hover:text-[#f5e7cb]'
+                        }`}
+                      >
+                        {rung.shortVi}
+                      </button>
+                    ))}
+                  </div>
+                  {offersFlankChoice(concession.id) && (
+                    <div className="flex items-center gap-1">
+                      {CONCESSION_FLANKS.filter(
+                        (side) => side.id !== 'ca_hai' || takesBothFlanks(concession.id),
+                      ).map((side) => (
+                        <button
+                          key={side.id}
+                          type="button"
+                          onClick={() =>
+                            onSelectConcession({ id: concession.id, flank: side.id })
+                          }
+                          className={`flex-1 py-1 rounded text-[10px] font-medium border cursor-pointer transition-colors ${
+                            concession.flank === side.id
+                              ? 'bg-[#2a5450] text-[#e7fbf7] border-[#78d9ca]/55'
+                              : 'bg-[#1a151e] text-[#b9ab96] border-[#d4a44e]/20 hover:text-[#f5e7cb]'
+                          }`}
+                        >
+                          {side.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
