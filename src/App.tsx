@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BoardState,
   Coord,
@@ -133,6 +133,7 @@ import {
 } from './scene/cinemaDirector';
 import { CommentaryVoiceName, wuxiaAudio } from './utils/wuxiaAudio';
 import { voiceMoveListener } from './utils/voiceMoveListener';
+import { createPauseAwareScheduler } from './utils/pauseAwareScheduler';
 import { TitleOverlay } from './components/TitleOverlay';
 import { TopBroadcastBar } from './components/TopBroadcastBar';
 import { CommentaryBanner } from './components/CommentaryBanner';
@@ -404,7 +405,14 @@ export default function App() {
   const selectedSquareRef = useRef(selectedSquare);
   const preferredPieceIdRef = useRef(preferredPieceId);
   const botThinkingRef = useRef(botThinking);
-  const botTimerRef = useRef<number | null>(null);
+  const botMoveScheduler = useMemo(
+    () =>
+      createPauseAwareScheduler({
+        set: (callback, delayMs) => window.setTimeout(callback, delayMs),
+        clear: (handle) => window.clearTimeout(handle),
+      }),
+    [],
+  );
   const speakTimerRef = useRef<number | null>(null);
   const speakUiSeqRef = useRef<number>(0);
 
@@ -442,6 +450,11 @@ export default function App() {
     appStateRef.current = appState;
     document.body.dataset.state = appState;
   }, [appState]);
+  useEffect(() => {
+    if (appState === 'paused') botMoveScheduler.pause();
+    else if (appState === 'playing') botMoveScheduler.resume();
+    else botMoveScheduler.cancel();
+  }, [appState, botMoveScheduler]);
   useEffect(() => {
     activeChallengerRef.current = activeChallenger;
   }, [activeChallenger]);
@@ -1113,7 +1126,7 @@ export default function App() {
         setHostEmotion(initialReaction);
         setBotThinking(true);
         stageRef.current?.setBotState('thinking', false);
-        if (botTimerRef.current) window.clearTimeout(botTimerRef.current);
+        botMoveScheduler.cancel();
 
         void (async () => {
           const botSearch =
@@ -1126,7 +1139,7 @@ export default function App() {
             }));
 
           if (
-            appStateRef.current !== 'playing' ||
+            (appStateRef.current !== 'playing' && appStateRef.current !== 'paused') ||
             turnSeqRef.current !== myTurnToken ||
             boardRef.current.turn !== 'black' ||
             boardRef.current.status !== 'playing'
@@ -1229,7 +1242,7 @@ export default function App() {
             );
 
             if (
-              appStateRef.current !== 'playing' ||
+              (appStateRef.current !== 'playing' && appStateRef.current !== 'paused') ||
               turnSeqRef.current !== myTurnToken ||
               boardRef.current.turn !== 'black'
             ) {
@@ -1281,34 +1294,34 @@ export default function App() {
           }
 
           const remainingThinkMs = Math.max(120, 760 - (Date.now() - thinkStartMs));
-          botTimerRef.current = window.setTimeout(() => {
-            const playBotMove = () => {
-              if (
-                appStateRef.current !== 'playing' ||
-                turnSeqRef.current !== myTurnToken
-              ) {
-                setBotThinking(false);
-                return;
-              }
-              const liveBoard = boardRef.current;
-              if (liveBoard.turn !== 'black' || liveBoard.status !== 'playing') {
-                setBotThinking(false);
-                return;
-              }
+          const playBotMove = () => {
+            if (
+              appStateRef.current !== 'playing' ||
+              turnSeqRef.current !== myTurnToken
+            ) {
               setBotThinking(false);
-              if (plannedBotMove) {
-                commitMove(plannedBotMove, BOT_MASTER_PROFILE.name, 'black', {
-                  nextAnalysis: boardAfterBotAnalysis,
-                  geminiPromise: parallelGeminiPromise,
-                  scoreDeltaForRed,
-                  turnToken: myTurnToken,
-                  voiceReply: voicePlannedReply,
-                });
-              }
-            };
+              return;
+            }
+            const liveBoard = boardRef.current;
+            if (liveBoard.turn !== 'black' || liveBoard.status !== 'playing') {
+              setBotThinking(false);
+              return;
+            }
+            setBotThinking(false);
+            if (plannedBotMove) {
+              commitMove(plannedBotMove, BOT_MASTER_PROFILE.name, 'black', {
+                nextAnalysis: boardAfterBotAnalysis,
+                geminiPromise: parallelGeminiPromise,
+                scoreDeltaForRed,
+                turnToken: myTurnToken,
+                voiceReply: voicePlannedReply,
+              });
+            }
+          };
+          botMoveScheduler.schedule(() => {
             if (stageRef.current?.isMoveAnimating()) {
               queueMoveSettledCue(choreoSeq, () => {
-                window.setTimeout(playBotMove, 0);
+                botMoveScheduler.schedule(playBotMove, 0);
               });
             } else {
               playBotMove();
@@ -2049,7 +2062,7 @@ export default function App() {
     stage.updateAnalysisVisuals(boardRef.current, analysis, true, null);
 
     return () => {
-      if (botTimerRef.current) window.clearTimeout(botTimerRef.current);
+      botMoveScheduler.cancel();
       if (speakTimerRef.current) window.clearTimeout(speakTimerRef.current);
       if (gestureChoreoTimerRef.current) window.clearTimeout(gestureChoreoTimerRef.current);
       pendingLandingCuesRef.current.clear();
@@ -2579,7 +2592,7 @@ export default function App() {
     turnSeqRef.current++;
     pendingLandingCuesRef.current.clear();
     pendingSettledCuesRef.current.clear();
-    if (botTimerRef.current) window.clearTimeout(botTimerRef.current);
+    botMoveScheduler.cancel();
     if (gestureChoreoTimerRef.current) {
       window.clearTimeout(gestureChoreoTimerRef.current);
       gestureChoreoTimerRef.current = null;
@@ -2636,7 +2649,7 @@ export default function App() {
     if (entry.opening) performScriptBeat(entry.opening, { moveNumber: 0, notation: 'Khai Cuộc Mới' });
     wuxiaAudio.playGuzhengSweep();
     if (entry.speakConcessionClaim) speakConcessionClaim(3800);
-  }, [concession, performScriptBeat, showAnalysis, speakConcessionClaim]);
+  }, [botMoveScheduler, concession, performScriptBeat, showAnalysis, speakConcessionClaim]);
 
   const handleSelectCamera = useCallback((preset: CameraPreset) => {
     setCameraPreset(preset);
@@ -3233,7 +3246,10 @@ export default function App() {
           onResume={() => setAppState('playing')}
           onRestart={handleResetMatch}
           onReturnTitle={() => {
-            if (botTimerRef.current) window.clearTimeout(botTimerRef.current);
+            turnSeqRef.current++;
+            pendingLandingCuesRef.current.clear();
+            pendingSettledCuesRef.current.clear();
+            botMoveScheduler.cancel();
             setBotThinking(false);
             setAppState('title');
           }}
