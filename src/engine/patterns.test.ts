@@ -191,6 +191,60 @@ test('Thiết Môn Thuyên: middle-file cannon pin plus a piece sealed on the �
   );
 });
 
+test('Thiên Địa Pháo needs a central cannon and a different cannon on the defender back rank', () => {
+  expectPattern(
+    'thien_dia_phao',
+    [
+      { r: 0, c: 3, side: 'black', type: 'king' },
+      { r: 0, c: 0, side: 'black', type: 'horse' },
+      { r: 5, c: 4, side: 'black', type: 'cannon' },
+      { r: 9, c: 0, side: 'black', type: 'cannon' },
+      { r: 9, c: 4, side: 'red', type: 'king' },
+    ],
+    { row: 0, col: 0 },
+    { row: 2, col: 1 },
+    'thien_dia_phao',
+  );
+
+  const { hit } = play(
+    buildBoard(
+      [
+        { r: 9, c: 3, side: 'red', type: 'king' },
+        { r: 9, c: 0, side: 'red', type: 'horse' },
+        { r: 4, c: 4, side: 'red', type: 'cannon' },
+        { r: 0, c: 0, side: 'red', type: 'cannon' },
+        { r: 0, c: 4, side: 'black', type: 'king' },
+      ],
+      'red',
+    ),
+    { row: 9, col: 0 },
+    { row: 7, col: 1 },
+  );
+  assert.equal(hit?.id, 'thien_dia_phao', 'the mirrored Red formation has the same shape');
+});
+
+test('one cannon cannot count as both halves of Thiên Địa Pháo', () => {
+  const fixtures: Spec[][] = [
+    [
+      { r: 0, c: 3, side: 'black', type: 'king' },
+      { r: 0, c: 0, side: 'black', type: 'horse' },
+      { r: 9, c: 4, side: 'black', type: 'cannon' },
+      { r: 8, c: 4, side: 'red', type: 'king' },
+    ],
+    [
+      { r: 0, c: 3, side: 'black', type: 'king' },
+      { r: 0, c: 0, side: 'black', type: 'horse' },
+      { r: 0, c: 4, side: 'black', type: 'cannon' },
+      { r: 8, c: 4, side: 'red', type: 'king' },
+    ],
+  ];
+
+  for (const pieces of fixtures) {
+    const { hit } = play(buildBoard(pieces, 'black'), { row: 0, col: 0 }, { row: 2, col: 1 });
+    assert.notEqual(hit?.id, 'thien_dia_phao', 'a single cannon is not an earth-and-sky pair');
+  }
+});
+
 test('Đại Đao Hoạch Tâm: supported chariot carving the centre advisor', () => {
   expectPattern(
     'dai_dao_hoach_tam',
