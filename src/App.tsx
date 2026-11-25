@@ -56,6 +56,7 @@ import {
   buildLiveSessionBeat,
   buildNightTeaseScript,
   buildRepetitionWarningScript,
+  buildVoicePreviewLine,
   classifyTacticalEvent,
   countBoardPieces,
   detectMatchPhase,
@@ -2819,6 +2820,11 @@ export default function App() {
     });
   }, []);
 
+  const getVoicePreviewLine = useCallback((kind: 'select' | 'test' | 'replay') => {
+    const { gender, age } = activeChallengerRef.current;
+    return buildVoicePreviewLine({ kind, guestGender: gender, guestAge: age });
+  }, []);
+
   const handleReplayOrTestVoice = useCallback(
     (customLine?: string) => {
       if (muted) {
@@ -2832,12 +2838,12 @@ export default function App() {
       const line =
         customLine ??
         commentary?.line ??
-        'Chàng ơi, đèn hoa chúc sáng rực rồi — mời chàng đi nước cờ đầu tiên cho hai họ phòng live cùng chiêm ngưỡng nha!';
+        getVoicePreviewLine('replay');
       triggerBotSpeaking(line, commentary?.mood ?? 'calm', {
         emotion: commentary?.emotion ?? hostEmotion,
       });
     },
-    [commentary, hostEmotion, muted, triggerBotSpeaking, voiceEnabled],
+    [commentary, getVoicePreviewLine, hostEmotion, muted, triggerBotSpeaking, voiceEnabled],
   );
 
   const handleTestWebhook = useCallback(async (ingestToken: string) => {
@@ -2995,9 +3001,7 @@ export default function App() {
           onSelectVoiceName={(v) => {
             setVoiceName(v);
             wuxiaAudio.voiceName = v;
-            handleReplayOrTestVoice(
-              'Hì hì... chàng nghe giọng này của thiếp — đã đủ ngọt ngào cho đêm hoa chúc chưa nào?',
-            );
+            handleReplayOrTestVoice(getVoicePreviewLine('select'));
           }}
           speechRate={speechRate}
           onSelectSpeechRate={(r) => {
@@ -3007,9 +3011,7 @@ export default function App() {
           speakingEngine={speakingEngine}
           onReplayVoice={() => handleReplayOrTestVoice()}
           onTestVoice={() =>
-            handleReplayOrTestVoice(
-              'Đêm hoa chúc... ánh trăng in bóng hồ sen đẹp quá! Chàng thắng ván này thì thiếp giao lại một lớp hồi môn, còn thua thì ra hành lang ngắm trăng nha!',
-            )
+            handleReplayOrTestVoice(getVoicePreviewLine('test'))
           }
           onRequestAiCommentary={() => {
             if (!board.lastMove && analysis.bestMove) {
@@ -3240,9 +3242,7 @@ export default function App() {
             onSelectVoiceName={(v) => {
               setVoiceName(v);
               wuxiaAudio.voiceName = v;
-              handleReplayOrTestVoice(
-                'Hì hì... chàng nghe giọng này của thiếp — đã đủ ngọt ngào cho đêm hoa chúc chưa nào?',
-              );
+              handleReplayOrTestVoice(getVoicePreviewLine('select'));
             }}
             speechRate={speechRate}
             onSelectSpeechRate={(r) => {
@@ -3250,9 +3250,7 @@ export default function App() {
               wuxiaAudio.speechRate = r;
             }}
             onTestVoice={() =>
-              handleReplayOrTestVoice(
-                'Đêm hoa chúc... ánh trăng in bóng hồ sen đẹp quá! Chàng thắng ván này thì thiếp giao lại một lớp hồi môn, còn thua thì ra hành lang ngắm trăng nha!',
-              )
+              handleReplayOrTestVoice(getVoicePreviewLine('test'))
             }
             onResetMatch={handleResetMatch}
             onTestWebhook={handleTestWebhook}

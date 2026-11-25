@@ -166,6 +166,30 @@ export function resolvePronounProfile(
   };
 }
 
+export function buildVoicePreviewLine(params: {
+  kind: 'select' | 'test' | 'replay';
+  guestGender: GuestGender;
+  guestAge: number;
+}): string {
+  const p = resolvePronounProfile(params.guestGender, params.guestAge);
+
+  if (params.kind === 'select') {
+    return p.storyMode === 'bridal_duel'
+      ? 'Hì hì... chàng nghe giọng này của thiếp — đã đủ ngọt ngào cho đêm hoa chúc chưa nào?'
+      : `Hì hì... ${p.guest} nghe giọng này của ${p.self} — đã đủ dịu dàng cho đêm trăng hôm nay chưa nào?`;
+  }
+
+  if (params.kind === 'replay') {
+    return p.storyMode === 'bridal_duel'
+      ? 'Chàng ơi, đèn hoa chúc sáng rực rồi — mời chàng đi nước cờ đầu tiên cho hai họ phòng live cùng chiêm ngưỡng nha!'
+      : `${p.guestCap} ơi, đèn hoa chúc sáng rực rồi — mời ${p.guest} đi nước cờ đầu tiên để ${p.audience} cùng chiêm ngưỡng nha!`;
+  }
+
+  return p.storyMode === 'bridal_duel'
+    ? 'Đêm hoa chúc... ánh trăng in bóng hồ sen đẹp quá! Chàng thắng ván này thì thiếp giao lại một lớp hồi môn, còn thua thì ra hành lang ngắm trăng nha!'
+    : `Đêm trăng... ánh trăng in bóng hồ sen đẹp quá! ${p.guestCap} thắng ván này thì ${p.self} xin kính ${p.guest} một chén trà thơm, còn thua thì mình cùng thưởng trà bàn chuyện nha!`;
+}
+
 export function buildBlackReplyEvaluation(
   before: DeepAnalysisResult,
   after: DeepAnalysisResult,
