@@ -258,6 +258,7 @@ app.post('/api/commentary', async (req: Request, res: Response) => {
     pieceCount,
     moveCount,
     recentLines,
+    ladderStep,
   } = req.body ?? {};
 
   if (!notation && !botMoveNotation && !playerMoveNotation) {
@@ -298,6 +299,16 @@ app.post('/api/commentary', async (req: Request, res: Response) => {
         ? `Các câu vừa nói gần đây (TUYỆT ĐỐI KHÔNG lặp ý, không lặp thán từ mở đầu): ${recentLines.slice(-5).join(' | ')}`
         : '';
 
+    // The dowry ladder is the only scoreboard the audience really reads - the voice must know
+    // how much of it is gone, or she keeps talking like nothing has been taken from her.
+    const ladderGone = typeof ladderStep === 'number' && ladderStep > 0 ? ladderStep : 0;
+    const dowryState =
+      ladderGone === 0
+        ? ''
+        : ladderGone >= 3
+          ? `Hồi môn đã mất ${ladderGone} lớp, không còn mũ phượng: ${pronouns.self} chẳng còn gì để giữ ngoài ván cờ — giọng thách đấu, không tiếc đồ, không nài nỉ, không nhắc chuyện cưới gả.`
+          : `Hồi môn đã mất ${ladderGone} lớp: ${pronouns.self} bắt đầu bực nhưng vẫn giữ phép lịch sự trên kỳ đài.`;
+
     const prompt = [
       `Giai đoạn ván cờ: ${phaseLabel || 'Hồi II · Trung Cuộc'} (Nước thứ ${moveCount ?? 1}, còn ${pieceCount ?? 28} quân trên bàn).`,
       `Khách mời đang đấu: "${cleanGuest}" (${guestCharacter || 'Kỳ thủ giang hồ'}, ${gender === 'nu' ? 'Nữ' : 'Nam'} ${age} tuổi).`,
@@ -306,6 +317,7 @@ app.post('/api/commentary', async (req: Request, res: Response) => {
       botMoveNotation ? `Bối cảnh kín (TUYỆT ĐỐI KHÔNG đọc ký hiệu): ${pronouns.self} vừa đáp ${botMoveNotation}.` : `Bối cảnh kín: ${side === 'red' ? pronouns.guestCap : pronouns.self} đi ${notation}.`,
       captured ? `Quân vừa bị bắt: ${captured}.` : '',
       `Diễn biến chiến thuật & cảm xúc: ${tacticalRead} (Thế trận: ${motif ?? 'Hoa Chúc Luận Kỳ'}, tỷ lệ thắng của ${pronouns.guest}: ${winProbRed ?? 50}%, điểm ${score ?? 0}).`,
+      dowryState,
       recentContext,
       'Viết lời thoại + chỉ đạo cử chỉ đồng bộ cho Kỳ Ma Điêu Nguyệt. Lời thoại gồm 2–3 vế ngắn sắc sảo (16–28 từ) BẮT BUỘC có dấu ngắt nhịp ("...", "—", "!", "?") để đọc lên có cảm xúc và độ lắng. Chọn cử chỉ (gesture) KHỚP 100% với nội dung vừa nói!',
     ]

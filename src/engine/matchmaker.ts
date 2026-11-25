@@ -125,6 +125,7 @@ export function buildInstantWuxiaCommentary(params: {
   scoreDeltaForRed?: number;
   prevWinProbRed?: number;
   recentLines?: string[];
+  ladderStep?: number;
 }): CommentaryItem {
   const {
     boardAfter,
@@ -139,6 +140,7 @@ export function buildInstantWuxiaCommentary(params: {
     scoreDeltaForRed = 0,
     prevWinProbRed,
     recentLines = [],
+    ladderStep = 0,
   } = params;
 
   const script = buildMovePerformanceScript({
@@ -152,6 +154,7 @@ export function buildInstantWuxiaCommentary(params: {
     scoreDeltaForRed,
     prevWinProbRed,
     recentLines,
+    ladderStep,
   });
 
   return {

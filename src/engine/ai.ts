@@ -839,8 +839,10 @@ export function detectMoveMotif(
     return 'Cố Thủ Liên Hoàn';
   }
 
+  // Only a king step reaches here, and "nội lực" was a made-up label the audience read as her
+  // level. An empty motif means the banner shows no tactic rather than a false one.
   void prevGrid;
-  return 'Nội Lực Chuyển Hóa';
+  return '';
 }
 
 export function findTacticalThreats(grid: BoardState['grid']): TacticalThreat[] {

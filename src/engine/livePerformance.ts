@@ -13,6 +13,7 @@ import { GuestGender } from '../data/characters';
 import { DeepAnalysisResult } from './ai';
 import { BoardState, Move, PIECE_NAME_VI, PieceType } from './xiangqi';
 import { HostEmotion } from '../scene/portraitKinematics';
+import { BankEntry, commentaryTier, tierPool } from './commentaryBank';
 
 export type MatchPhase = 'khai_cuoc' | 'trung_cuoc' | 'tan_cuoc' | 'hoi_ket';
 
@@ -231,6 +232,51 @@ interface ScriptTemplate {
   motif?: string;
 }
 
+const VOICED_EVENTS: TacticalEventType[] = [
+  'checkmate_red',
+  'checkmate_black',
+  'check_bot',
+  'check_player',
+  'heavy_capture_bot',
+  'heavy_capture_player',
+  'light_capture_bot',
+  'light_capture_player',
+  'brilliant_player',
+  'blunder_player',
+  'comeback_player',
+  'perpetual_check_ruling',
+  'repetition_draw',
+  'sixty_move_draw',
+];
+
+/**
+ * Pavilion chess crowds make noise on captures and checks, not on quiet developing moves.
+ * Silence is what makes the next line land, so quiet plies only update the banner text.
+ */
+export function shouldVoiceCommentary(params: {
+  tacticalEvent: TacticalEventType;
+  killPattern: boolean;
+  phaseChanged: boolean;
+  moveCount: number;
+}): boolean {
+  if (VOICED_EVENTS.includes(params.tacticalEvent)) return true;
+  if (params.killPattern) return true;
+  if (params.phaseChanged) return true;
+  return params.moveCount % 7 === 0;
+}
+
+function renderBankEntry(
+  entry: BankEntry,
+  ctx: Record<string, string>,
+): ScriptTemplate {
+  const fill = (text: string): string => {
+    const filled = text.replace(/\{(\w+)\}/g, (_m, token: string) => ctx[token] ?? '');
+    // A line may open on {self} or {guest}, whose values are lowercase honorifics.
+    return filled.charAt(0).toUpperCase() + filled.slice(1);
+  };
+  return { ...entry, line: fill(entry.line), stageDirection: fill(entry.stageDirection) };
+}
+
 /**
  * Generates a fully choreographed Move Performance Script (Dialogue + Emotion + Gesture + Stage Direction)
  * tailored to the exact chess phase, tactical shock, opening archetype, and challenger identity.
@@ -246,6 +292,8 @@ export function buildMovePerformanceScript(params: {
   scoreDeltaForRed: number;
   prevWinProbRed?: number;
   recentLines?: string[];
+  /** Dowry layers the challenger has already taken - drives the delivery tier, not the ruling. */
+  ladderStep?: number;
 }): PerformanceScript {
   const {
     boardAfter,
@@ -258,6 +306,7 @@ export function buildMovePerformanceScript(params: {
     scoreDeltaForRed,
     prevWinProbRed,
     recentLines = [],
+    ladderStep = 0,
   } = params;
 
   const phase = detectMatchPhase(boardAfter);
@@ -276,6 +325,9 @@ export function buildMovePerformanceScript(params: {
   const capVi = move.captured
     ? PIECE_NAME_VI[move.captured.side][move.captured.type]
     : '';
+  // A quiet king step has no motif to name; speech still needs a noun, and inventing a tactic
+  // name is exactly what the banner must not do.
+  const spokenMotif = playedMotif || 'thế khai cuộc';
   const isBridal = p.storyMode === 'bridal_duel';
   const stakePunish = isBridal
     ? 'ôm gối ra hành lang ngắm trăng'
@@ -526,14 +578,14 @@ export function buildMovePerformanceScript(params: {
     case 'opening_signature':
       pool = [
         {
-          line: `Ồ, mở màn bằng thế ${playedMotif} tự tin ghê nha ${p.guest}! Nến đỏ chưa tàn một tấc — mà khí thế đã dậy sóng khắp hồ sen rồi!`,
+          line: `Ồ, mở màn bằng thế ${spokenMotif} tự tin ghê nha ${p.guest}! Nến đỏ chưa tàn một tấc — mà khí thế đã dậy sóng khắp hồ sen rồi!`,
           emotion: 'amused',
           gesture: 'sip_tea',
           stageDirection: 'Thong thả thưởng trà ngắm thế khai cuộc bài bản',
           motif: playedMotif,
         },
         {
-          line: `${p.guestCap} dàn trận ${playedMotif} bài bản quá! ${p.audience} đoán xem — ván này ai sẽ làm chủ chòi trăng đêm nay đây?`,
+          line: `${p.guestCap} dàn trận ${spokenMotif} bài bản quá! ${p.audience} đoán xem — ván này ai sẽ làm chủ chòi trăng đêm nay đây?`,
           emotion: 'amused',
           gesture: 'tease',
           stageDirection: 'Che quạt khẽ cười, khuấy động bình luận phòng live',
@@ -694,7 +746,30 @@ export function buildMovePerformanceScript(params: {
       break;
   }
 
-  const chosen = pickFresh(pool, recentLines, seed);
+  const tier = commentaryTier({
+    ladderStep,
+    phase,
+    moveCount: boardAfter.moveCount,
+    scoreDeltaForRed,
+  });
+  const ctx = {
+    guest: p.guest,
+    capGuest: p.guestCap,
+    self: p.self,
+    capSelf: p.self.charAt(0).toUpperCase() + p.self.slice(1),
+    audience: p.audience,
+    name: shortName,
+    piece: capVi,
+    motif: spokenMotif,
+  };
+  const tierLines = tierPool(tacticalEvent, tier).map((entry) => renderBankEntry(entry, ctx));
+  // A tier only wins while it still has something new to say; once its three deliveries are all
+  // in the recent window the base pool takes over again instead of repeating the same taunt.
+  const freshTier = tierLines.filter((entry) => !recentLines.includes(entry.line));
+  const chosen =
+    freshTier.length > 0
+      ? freshTier[Math.abs(seed) % freshTier.length]
+      : pickFresh(pool, recentLines, seed);
 
   return {
     line: chosen.line,

@@ -77,12 +77,16 @@ export const CommentaryBanner: React.FC<CommentaryBannerProps> = ({
                 </span>
               </>
             )}
-            <span aria-hidden="true" className="text-[#8a7657] hidden sm:inline">
-              ·
-            </span>
-            <span className="truncate text-[#e6d5b8] hidden sm:inline">
-              {commentary.motif}
-            </span>
+            {commentary.motif && (
+              <>
+                <span aria-hidden="true" className="text-[#8a7657] hidden sm:inline">
+                  ·
+                </span>
+                <span className="truncate text-[#e6d5b8] hidden sm:inline">
+                  {commentary.motif}
+                </span>
+              </>
+            )}
           </div>
 
           <button
