@@ -10,6 +10,7 @@ import {
 import { Side } from '../engine/xiangqi';
 import { BOT_MASTER_PROFILE } from '../data/characters';
 import { ChallengerEntry } from '../engine/matchmaker';
+import { BridalLadder, DOWRY_LAYERS, isHeld } from '../engine/bridalLadder';
 import {
   PIECE_LABEL_MODES,
   PIECE_THEMES,
@@ -30,6 +31,7 @@ interface TopBroadcastBarProps {
   muted: boolean;
   tiktokFrame: boolean;
   viewerCount: number;
+  dowry: BridalLadder;
   liveMode?: 'duel_1v1' | 'crowd_vote';
   awaitingReadyCheck?: boolean;
   pieceStyle: PieceVisualConfig;
@@ -56,6 +58,7 @@ export const TopBroadcastBar: React.FC<TopBroadcastBarProps> = ({
   muted,
   tiktokFrame,
   viewerCount,
+  dowry,
   liveMode = 'duel_1v1',
   awaitingReadyCheck = false,
   pieceStyle,
@@ -72,6 +75,9 @@ export const TopBroadcastBar: React.FC<TopBroadcastBarProps> = ({
   const activeThemeShort = PIECE_THEMES[pieceStyle.theme]?.shortLabel ?? 'Ngà Đỏ';
   const activeLabelShort =
     PIECE_LABEL_MODES.find((m) => m.id === pieceStyle.labelMode)?.shortLabel ?? 'Hán';
+  const dowryHeldNames = DOWRY_LAYERS.filter((layer) => isHeld(dowry, layer.id))
+    .map((layer) => layer.nameVi)
+    .join(', ');
 
   return (
     <div
@@ -175,6 +181,33 @@ export const TopBroadcastBar: React.FC<TopBroadcastBarProps> = ({
 
           <div className="font-mono-num text-[#cbb99b]">
             {viewerCount.toLocaleString('vi-VN')} xem
+          </div>
+
+          <span aria-hidden="true" className="text-[#695c4d]">
+            ·
+          </span>
+
+          {/* Dowry ladder: the concession the audience is actually watching fall apart */}
+          <div
+            className="flex items-center gap-1.5"
+            role="img"
+            aria-label={`Hồi môn còn lại ${dowry.held.length} trên ${DOWRY_LAYERS.length}: ${dowryHeldNames}`}
+            title={`Hồi môn còn lại: ${dowryHeldNames}`}
+          >
+            <span className="text-[10px] uppercase tracking-wider text-[#9c8c75]">Hồi môn</span>
+            <div className="flex items-center gap-[3px]">
+              {DOWRY_LAYERS.map((layer) => (
+                <span
+                  key={layer.id}
+                  aria-hidden="true"
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    isHeld(dowry, layer.id)
+                      ? 'bg-[#e5b864]'
+                      : 'bg-[#3a2226] ring-1 ring-[#c93b2f]/70'
+                  }`}
+                />
+              ))}
+            </div>
           </div>
         </div>
       </div>

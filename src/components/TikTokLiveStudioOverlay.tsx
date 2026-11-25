@@ -519,9 +519,13 @@ export const TikTokLiveStudioOverlay: React.FC<TikTokLiveStudioOverlayProps> = (
             >
               <div className="flex items-center justify-between gap-2 text-[10px] text-[#d6b779] mb-0.5">
                 <span className="truncate font-semibold">
-                  {commentary.phaseLabel ? `${commentary.phaseLabel} · ` : ''}
-                  {commentary.emotionLabel ? `${commentary.emotionLabel} · ` : ''}
-                  {commentary.motif}
+                  {[
+                    commentary.phaseLabel,
+                    commentary.emotionLabel,
+                    commentary.motif,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
                 </span>
                 <button
                   type="button"

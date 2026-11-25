@@ -55,7 +55,20 @@ import {
   classifyTacticalEvent,
   countBoardPieces,
   detectMatchPhase,
+  shouldVoiceCommentary,
 } from './engine/livePerformance';
+import { detectKillPattern } from './engine/patterns';
+import {
+  BridalLadder,
+  DOWRY_LAYERS,
+  DowryLayer,
+  forfeitCandle,
+  forfeitForPattern,
+  initialLadder,
+  ladderStep as countLadderStep,
+  loadLadder,
+  saveLadder,
+} from './engine/bridalLadder';
 import { refereeForBoard } from './engine/repetitionReferee';
 import {
   CrowdVoteState,
@@ -251,6 +264,8 @@ export default function App() {
     loadSavedPieceStyle(),
   );
   const pieceStyleRef = useRef(pieceStyle);
+  const [dowry, setDowry] = useState<BridalLadder>(() => loadLadder(window.localStorage));
+  const dowryRef = useRef(dowry);
   const [moveEvent, setMoveEvent] = useState<MoveChoreoPayload | null>(null);
   const [actionCue, setActionCue] = useState<ActionCuePayload | null>(null);
   const focusSeqRef = useRef(0);
@@ -258,6 +273,7 @@ export default function App() {
   const actionCueSeqRef = useRef(0);
   const recentLinesRef = useRef<string[]>([]);
   const recentPosKeysRef = useRef<string[]>([]);
+  const phaseRef = useRef<ReturnType<typeof detectMatchPhase> | null>(null);
   const prevScoreRef = useRef<number>(0);
   const prevWinProbRedRef = useRef<number>(50);
   const turnSeqRef = useRef<number>(0);
@@ -418,8 +434,27 @@ export default function App() {
   );
 
   const recordRecentLine = useCallback((line: string) => {
-    recentLinesRef.current = [...recentLinesRef.current.slice(-9), line];
+    // Wider than any single event pool, otherwise pickFresh filters to empty and cycles anyway.
+    recentLinesRef.current = [...recentLinesRef.current.slice(-14), line];
   }, []);
+
+  const applyDowryForfeit = useCallback(
+    (next: BridalLadder, lost: DowryLayer | null, reason: string) => {
+      if (!lost) return;
+      dowryRef.current = next;
+      setDowry(next);
+      saveLadder(window.localStorage, next);
+      appendMessage({
+        username: 'Trong Tài Kỳ Đài',
+        text:
+          `${reason} — tân nương giao lại ${lost.nameVi} cho ` +
+          `${activeChallengerRef.current.username}. ` +
+          `Hồi môn còn lại: ${next.held.length}/${DOWRY_LAYERS.length}.`,
+        kind: 'system',
+      });
+    },
+    [appendMessage],
+  );
 
   const dispatchGestureCue = useCallback(
     (gesture?: PerformanceGesture, stageDirection?: string, delayMs = 0) => {
@@ -542,6 +577,7 @@ export default function App() {
             botCaptured: params.botCaptured,
             guestCharacter: guest.character.title,
             moveCount: params.nextBoard.moveCount,
+            ladderStep: countLadderStep(dowryRef.current),
             recentLines: recentLinesRef.current,
             auto: !params.explicitRequest,
           }),
@@ -611,6 +647,7 @@ export default function App() {
         geminiPromise?: Promise<CommentaryItem | null>;
         scoreDeltaForRed?: number;
         turnToken?: number;
+        voiceReply?: boolean;
       },
     ) => {
       const currentBoard = boardRef.current;
@@ -673,6 +710,22 @@ export default function App() {
       });
 
       const playedMotif = detectMoveMotif(currentBoard.grid, move, nextBoard.grid);
+      const killStrike = detectKillPattern(currentBoard.grid, nextBoard.grid, move);
+
+      // The dowry only moves when a checking pattern really lands on the bride, or when she
+      // loses the game - it is a consequence on the board, never a scripted handicap.
+      if (killStrike && killStrike.forcing && side === 'red' && nextBoard.status === 'playing') {
+        const forfeit = forfeitForPattern(dowryRef.current, killStrike.id);
+        applyDowryForfeit(
+          forfeit.ladder,
+          forfeit.lost,
+          `${killStrike.nameVi} của ${actorName} đã thành công`,
+        );
+      }
+      if (nextBoard.status === 'red_win') {
+        const snuffed = forfeitCandle(dowryRef.current);
+        applyDowryForfeit(snuffed.ladder, snuffed.lost, 'Ván cờ ngã ngũ bên phía đỏ');
+      }
 
       // Case 0: Repetition referee. The warning is a once-per-cycle chat line ALWAYS (viewers need
       // the rule spelled out), while the spoken nudge waits for the bride to finish talking.
@@ -746,6 +799,7 @@ export default function App() {
           scoreDeltaForRed,
           prevWinProbRed,
           recentLines: recentLinesRef.current,
+          ladderStep: countLadderStep(dowryRef.current),
         });
         recordRecentLine(fallbackEnd.line);
         setCommentary(fallbackEnd);
@@ -823,6 +877,7 @@ export default function App() {
 
           const plannedBotMove = botSearch.bestMove;
           let parallelGeminiPromise: Promise<CommentaryItem | null> | undefined;
+          let voicePlannedReply: boolean | undefined;
           let boardAfterBotAnalysis: DeepAnalysisResult | undefined;
 
           if (plannedBotMove) {
@@ -846,24 +901,46 @@ export default function App() {
               return;
             }
 
-            parallelGeminiPromise = requestEmotionalGeminiCommentary({
-              notation: botNotation,
-              playerMoveNotation: notation,
-              botMoveNotation: botNotation,
-              actorName: BOT_MASTER_PROFILE.name,
-              side: 'black',
-              nextBoard: simulatedAfterBot,
+            const plannedReplyPhase = detectMatchPhase(simulatedAfterBot);
+            const plannedReplyEvent = classifyTacticalEvent({
+              boardAfter: simulatedAfterBot,
               move: plannedBotMove,
-              nextAnalysis: boardAfterBotAnalysis,
+              analysis: boardAfterBotAnalysis,
               scoreDeltaForRed,
               prevWinProbRed,
-              playerCaptured: move.captured
-                ? PIECE_NAME_VI[move.captured.side][move.captured.type]
-                : undefined,
-              botCaptured: plannedBotMove.captured
-                ? PIECE_NAME_VI[plannedBotMove.captured.side][plannedBotMove.captured.type]
-                : undefined,
+              phase: plannedReplyPhase,
             });
+            // The paid Gemini round-trip is only worth firing on a ply she would actually speak
+            // over, so the silence budget decides the network call too — same inputs, same answer.
+            voicePlannedReply = shouldVoiceCommentary({
+              tacticalEvent: plannedReplyEvent,
+              killPattern: Boolean(
+                detectKillPattern(nextBoard.grid, simulatedAfterBot.grid, plannedBotMove)?.forcing,
+              ),
+              phaseChanged: plannedReplyPhase !== phaseRef.current,
+              moveCount: simulatedAfterBot.moveCount,
+            });
+
+            if (voicePlannedReply) {
+              parallelGeminiPromise = requestEmotionalGeminiCommentary({
+                notation: botNotation,
+                playerMoveNotation: notation,
+                botMoveNotation: botNotation,
+                actorName: BOT_MASTER_PROFILE.name,
+                side: 'black',
+                nextBoard: simulatedAfterBot,
+                move: plannedBotMove,
+                nextAnalysis: boardAfterBotAnalysis,
+                scoreDeltaForRed,
+                prevWinProbRed,
+                playerCaptured: move.captured
+                  ? PIECE_NAME_VI[move.captured.side][move.captured.type]
+                  : undefined,
+                botCaptured: plannedBotMove.captured
+                  ? PIECE_NAME_VI[plannedBotMove.captured.side][plannedBotMove.captured.type]
+                  : undefined,
+              });
+            }
           }
 
           const remainingThinkMs = Math.max(120, 760 - (Date.now() - thinkStartMs));
@@ -884,6 +961,7 @@ export default function App() {
                 geminiPromise: parallelGeminiPromise,
                 scoreDeltaForRed,
                 turnToken: myTurnToken,
+                voiceReply: voicePlannedReply,
               });
             }
           }, remainingThinkMs);
@@ -912,6 +990,26 @@ export default function App() {
       stageRef.current?.updateAnalysisVisuals(nextBoard, nextAnalysis, showAnalysis, null);
 
       const guest = activeChallengerRef.current;
+      const replyPhase = detectMatchPhase(nextBoard);
+      const replyPhaseChanged = phaseRef.current !== replyPhase;
+      phaseRef.current = replyPhase;
+      const replyEvent = classifyTacticalEvent({
+        boardAfter: nextBoard,
+        move,
+        analysis: nextAnalysis,
+        scoreDeltaForRed,
+        prevWinProbRed,
+        phase: replyPhase,
+      });
+      // Silence budget: the bride talks on beats that actually changed the show, not on every ply.
+      const voiceReply =
+        precomputed?.voiceReply ??
+        shouldVoiceCommentary({
+          tacticalEvent: replyEvent,
+          killPattern: Boolean(killStrike?.forcing),
+          phaseChanged: replyPhaseChanged,
+          moveCount: nextBoard.moveCount,
+        });
       const fallbackCmt = buildInstantWuxiaCommentary({
         boardAfter: nextBoard,
         move,
@@ -925,6 +1023,7 @@ export default function App() {
         scoreDeltaForRed,
         prevWinProbRed,
         recentLines: recentLinesRef.current,
+        ladderStep: countLadderStep(dowryRef.current),
       });
 
       const expectedToken = precomputed?.turnToken ?? turnSeqRef.current;
@@ -940,6 +1039,7 @@ export default function App() {
           cmt.stageDirection ?? fallbackCmt.stageDirection,
           1250,
         );
+        if (!voiceReply) return;
         triggerBotSpeaking(cmt.line, cmt.mood, {
           emotion: emo,
           vocalCue: cmt.vocalCue,
@@ -960,6 +1060,7 @@ export default function App() {
     },
     [
       appendMessage,
+      applyDowryForfeit,
       dispatchGestureCue,
       performScriptBeat,
       recordRecentLine,
@@ -2043,8 +2144,13 @@ export default function App() {
     nudgedTurnKeyRef.current = '';
     countdownTurnKeyRef.current = '';
     recentLinesRef.current = [];
+    phaseRef.current = null;
     lastRepetitionWarnPlyRef.current = -999;
     recentPosKeysRef.current = freshAnalysis.positionKey ? [freshAnalysis.positionKey] : [];
+    // A new duel puts the whole stake back on the table; the ladder only escalates within one.
+    dowryRef.current = initialLadder();
+    setDowry(dowryRef.current);
+    saveLadder(window.localStorage, dowryRef.current);
     setBoard(fresh);
     boardRef.current = fresh;
     setAnalysis(freshAnalysis);
@@ -2504,6 +2610,7 @@ export default function App() {
             muted={muted}
             tiktokFrame={tiktokFrame}
             viewerCount={viewerCount}
+            dowry={dowry}
             liveMode={liveMode}
             awaitingReadyCheck={awaitingReadyCheck}
             onToggleAnalysis={() => {
