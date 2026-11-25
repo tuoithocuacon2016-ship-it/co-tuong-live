@@ -18,6 +18,7 @@ import {
   sanitizeHandle,
 } from './src/engine/liveIdentity';
 import { ENDPOINT_BUDGETS, callerKey, createBudgetLedger } from './src/server/requestBudget';
+import { normalizeGeminiCommentaryResponse } from './src/engine/geminiCommentary';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -235,34 +236,6 @@ app.post('/api/live/webhook', requireIngestAuth, (req: Request, res: Response) =
 });
 
 // Server-side Gemini Expressive TikTok Live Chess Host Commentator
-const VALID_EMOTIONS = new Set([
-  'calm',
-  'amused',
-  'thinking',
-  'surprised',
-  'fierce',
-  'check',
-  'victory',
-]);
-
-const EMOTION_LABEL_MAP: Record<string, string> = {
-  calm: 'Điềm tĩnh',
-  amused: 'Trêu chọc',
-  thinking: 'Trầm ngâm',
-  surprised: 'Bất ngờ',
-  fierce: 'Sát khí',
-  check: 'Chiếu tướng!',
-  victory: 'Khải hoàn',
-};
-
-const VALID_GESTURES = new Set([
-  'sip_tea',
-  'tease',
-  'think_fan',
-  'closeup_talk',
-  'groom_react',
-]);
-
 app.post('/api/commentary', async (req: Request, res: Response) => {
   const ai = getGeminiClient();
   if (!ai) {
@@ -376,7 +349,7 @@ app.post('/api/commentary', async (req: Request, res: Response) => {
       playerMoveNotation ? `Bối cảnh kín (TUYỆT ĐỐI KHÔNG đọc ký hiệu): ${pronouns.guestCap} vừa đi ${playerMoveNotation}.` : '',
       botMoveNotation ? `Bối cảnh kín (TUYỆT ĐỐI KHÔNG đọc ký hiệu): ${pronouns.self} vừa đáp ${botMoveNotation}.` : `Bối cảnh kín: ${side === 'red' ? pronouns.guestCap : pronouns.self} đi ${notation}.`,
       captured ? `Quân vừa bị bắt: ${captured}.` : '',
-      `Diễn biến chiến thuật & cảm xúc: ${tacticalRead} (Thế trận: ${motif ?? 'Hoa Chúc Luận Kỳ'}, tỷ lệ thắng của ${pronouns.guest}: ${winProbRed ?? 50}%, điểm ${score ?? 0}).`,
+      `Diễn biến chiến thuật & cảm xúc: ${tacticalRead} (Tên sát pháp engine đã xác minh: ${motif ? `"${motif}"` : 'chưa có'}, tỷ lệ thắng của ${pronouns.guest}: ${winProbRed ?? 50}%, điểm ${score ?? 0}).`,
       dowryState,
       recentContext,
       'Viết lời thoại + chỉ đạo cử chỉ đồng bộ cho Kỳ Ma Điêu Nguyệt. Lời thoại gồm 2–3 vế ngắn sắc sảo (16–28 từ) BẮT BUỘC có dấu ngắt nhịp ("...", "—", "!", "?") để đọc lên có cảm xúc và độ lắng. Chọn cử chỉ (gesture) KHỚP 100% với nội dung vừa nói!',
@@ -411,7 +384,8 @@ app.post('/api/commentary', async (req: Request, res: Response) => {
               '- "think_fan": khi trầm ngâm suy tính thế cờ khó hoặc khen nước sâu hiểm. ' +
               '- "closeup_talk": khi chiếu tướng nghẹt thở, bất ngờ sửng sốt, lật kèo, hoặc trò chuyện trực diện đầy cảm xúc. ' +
               '- "groom_react": khi đối thủ vừa ra đòn xuất thần/chiếu ngược khiến camera lia sang tôn vinh đối thủ. ' +
-              '(5) KHÔNG emoji, KHÔNG ngoặc kép thừa, KHÔNG thẻ XML, KHÔNG tiếng Anh trong lời thoại.',
+              '(5) KHÔNG emoji, KHÔNG ngoặc kép thừa, KHÔNG thẻ XML, KHÔNG tiếng Anh trong lời thoại. ' +
+              '(6) Tên sát pháp trong dữ liệu đã được engine xác minh: tuyệt đối không tự đặt, đổi hay nhắc thêm tên sát pháp khác; nếu dữ liệu ghi chưa có thì không nêu tên sát pháp nào.',
             thinkingConfig: {
               thinkingLevel: plan.thinkingLevel,
             },
@@ -419,10 +393,6 @@ app.post('/api/commentary', async (req: Request, res: Response) => {
             responseSchema: {
               type: Type.OBJECT,
               properties: {
-                motif: {
-                  type: Type.STRING,
-                  description: 'Tên sắc thái thế trận 2–4 chữ giàu chất kiếm hiệp hoa chúc.',
-                },
                 line: {
                   type: Type.STRING,
                   description: '2–3 vế ngắn tiếng Việt giàu cảm xúc có dấu ngắt (... — ! ?), tổng 16–28 từ, không đọc ký hiệu nước đi.',
@@ -440,7 +410,7 @@ app.post('/api/commentary', async (req: Request, res: Response) => {
                   description: 'Mô tả cử chỉ diễn xuất ngắn gọn 5–10 chữ tiếng Việt (vd: Khẽ nâng chén trà sen, liếc nhìn bàn cờ).',
                 },
               },
-              required: ['motif', 'line', 'emotion', 'gesture', 'stageDirection'],
+              required: ['line', 'emotion', 'gesture', 'stageDirection'],
             },
           },
         });
@@ -465,39 +435,13 @@ app.post('/api/commentary', async (req: Request, res: Response) => {
     }
 
     const rawText = (response.text ?? '').trim();
-    const parsed = JSON.parse(rawText);
-    const emotion = VALID_EMOTIONS.has(parsed.emotion) ? String(parsed.emotion) : 'calm';
-    const gesture = VALID_GESTURES.has(parsed.gesture) ? String(parsed.gesture) : 'closeup_talk';
-    const mood =
-      emotion === 'check'
-        ? 'check'
-        : emotion === 'victory'
-          ? 'victory'
-          : emotion === 'fierce'
-            ? 'fierce'
-            : 'calm';
-    const cleanLine = String(parsed.line ?? '')
-      .replace(/<[^>]+>/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-    const cleanStageDirection = String(parsed.stageDirection ?? '')
-      .replace(/<[^>]+>/g, '')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 64);
-
-    res.json({
-      ok: true,
-      motif: String(parsed.motif ?? motif ?? 'Hoa Chúc Luận Kỳ'),
-      line: cleanLine,
-      mood,
-      emotion,
-      emotionLabel: EMOTION_LABEL_MAP[emotion] ?? 'Điềm tĩnh',
-      gesture,
-      stageDirection: cleanStageDirection,
-      phaseLabel: phaseLabel || undefined,
-      vocalCue: '',
+    const payload = normalizeGeminiCommentaryResponse(JSON.parse(rawText), {
+      motif: String(motif ?? ''),
+      phaseLabel: String(phaseLabel ?? ''),
     });
+    if (!payload) throw new Error('Gemini không trả về lời bình hợp lệ.');
+
+    res.json({ ok: true, ...payload });
   } catch (err: unknown) {
     if (req.body?.auto) {
       res.json({ ok: false, fallback: 'engine' });
@@ -675,22 +619,19 @@ app.post('/api/live-reply', async (req: Request, res: Response) => {
       });
 
       const parsed = JSON.parse((response.text ?? '{}').trim());
-      const cleanLine = String(parsed.line ?? '')
-        .replace(/<[^>]+>/g, '')
-        .replace(/["“”]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-      if (!cleanLine) throw new Error('Empty live reply');
+      const payload = normalizeGeminiCommentaryResponse(
+        { ...parsed, emotion: parsed?.emotion ?? 'amused' },
+        { motif: '', phaseLabel: '' },
+      );
+      if (!payload) throw new Error('Empty live reply');
 
-      const emotion = VALID_EMOTIONS.has(parsed.emotion) ? String(parsed.emotion) : 'amused';
-      const gesture = VALID_GESTURES.has(parsed.gesture) ? String(parsed.gesture) : 'closeup_talk';
       res.json({
         ok: true,
-        line: cleanLine,
-        emotion,
-        emotionLabel: EMOTION_LABEL_MAP[emotion] ?? 'Trêu chọc',
-        gesture,
-        stageDirection: String(parsed.stageDirection ?? 'Mỉm cười giao lưu cùng phòng live').slice(0, 64),
+        line: payload.line.replace(/["“”]/g, ''),
+        emotion: payload.emotion,
+        emotionLabel: payload.emotionLabel,
+        gesture: payload.gesture,
+        stageDirection: payload.stageDirection ?? 'Mỉm cười giao lưu cùng phòng live',
       });
       return;
     } catch (err) {
