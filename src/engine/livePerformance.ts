@@ -266,16 +266,21 @@ export function shouldVoiceCommentary(params: {
   return params.moveCount % 7 === 0;
 }
 
+function fillSpeechTokens(text: string, ctx: Record<string, string>): string {
+  const filled = text.replace(/\{(\w+)\}/g, (_m, token: string) => ctx[token] ?? '');
+  // A line may open on {self} or {guest}, whose values are lowercase honorifics.
+  return filled.charAt(0).toUpperCase() + filled.slice(1);
+}
+
 function renderBankEntry(
   entry: BankEntry,
   ctx: Record<string, string>,
 ): ScriptTemplate {
-  const fill = (text: string): string => {
-    const filled = text.replace(/\{(\w+)\}/g, (_m, token: string) => ctx[token] ?? '');
-    // A line may open on {self} or {guest}, whose values are lowercase honorifics.
-    return filled.charAt(0).toUpperCase() + filled.slice(1);
+  return {
+    ...entry,
+    line: fillSpeechTokens(entry.line, ctx),
+    stageDirection: fillSpeechTokens(entry.stageDirection, ctx),
   };
-  return { ...entry, line: fill(entry.line), stageDirection: fill(entry.stageDirection) };
 }
 
 /** The pronoun tokens every spoken line is rendered through - the xưng hô rule of the whole show. */
@@ -288,6 +293,15 @@ function speechContext(p: PronounProfile, shortName: string): Record<string, str
     audience: p.audience,
     name: shortName,
   };
+}
+
+/** Bank copy is stored with tokens; rules written in another module get the same reading. */
+export function renderSpeechTokens(
+  text: string,
+  params: { guestGender: GuestGender; guestAge: number; challengerName: string },
+): string {
+  const p = resolvePronounProfile(params.guestGender, params.guestAge);
+  return fillSpeechTokens(text, speechContext(p, params.challengerName.replace(/^@/, '')));
 }
 
 /**

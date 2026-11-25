@@ -1,6 +1,12 @@
 import { GuestGender } from '../data/characters';
 import { HostEmotion } from '../scene/portraitKinematics';
-import { PerformanceGesture, PerformanceScript, resolvePronounProfile } from './livePerformance';
+import {
+  PerformanceGesture,
+  PerformanceScript,
+  renderSpeechTokens,
+  resolvePronounProfile,
+} from './livePerformance';
+import { CONCESSION_LINE_VI, ShieldKind } from './handicap';
 import { ChallengerEntry } from './matchmaker';
 import { formatMoveVietnamese, normalizeVietnamese, parseVietnameseChatMove } from './notation';
 import { BoardState, Move } from './xiangqi';
@@ -309,7 +315,9 @@ export type InteractionBeatKind =
   | 'afk_warn_10s'
   | 'afk_auto_move'
   | 'afk_rotate'
-  | 'crowd_vote_commit';
+  | 'crowd_vote_commit'
+  | 'concession_refused'
+  | 'concession_claim';
 
 function pickFresh(pool: string[], recentLines: string[] = []): string {
   const recentSet = new Set(recentLines.slice(-8));
@@ -331,6 +339,10 @@ export function buildLiveInteractionScript(params: {
   redScore?: number;
   nextChallengerName?: string;
   voteCount?: number;
+  /** Which 让子 protection just stopped the challenger's capture. */
+  shield?: ShieldKind;
+  /** The rung's own announcement, straight from the handicap ladder's copy. */
+  concessionClaim?: string;
   recentLines?: string[];
 }): PerformanceScript {
   const {
@@ -553,6 +565,36 @@ export function buildLiveInteractionScript(params: {
       'closeup_talk',
       'Xoay người duyên dáng mời kỳ thủ tiếp theo lên bàn cờ',
       'Luân Chuyển Kỳ Đài',
+    );
+  }
+
+  if (kind === 'concession_refused') {
+    // The rule is said exactly as the ladder writes it, so the spoken concession and the banner
+    // cannot drift apart.
+    const line = renderSpeechTokens(CONCESSION_LINE_VI[params.shield ?? 'thiet_binh'], {
+      guestGender,
+      guestAge,
+      challengerName,
+    });
+    return build(
+      line,
+      'amused',
+      'tease',
+      'Giơ quạt lụa chặn tay khách giữa bàn, mỉm cười nhắc lệ chấp quân',
+      'Nhắc Lệ Chấp Quân',
+    );
+  }
+
+  if (kind === 'concession_claim') {
+    const line = params.concessionClaim
+      ? renderSpeechTokens(params.concessionClaim, { guestGender, guestAge, challengerName })
+      : `Đêm nay ${p.self} đi thuận cờ, không chấp một quân nào - ${p.guest} chịu đủ áp lực nhé ${p.audience} ơi.`;
+    return build(
+      line,
+      'calm',
+      'closeup_talk',
+      'Tuyên bố lệ chấp trước ống kính, tay rút bớt quân khỏi bàn khai cuộc',
+      'Tuyên Bố Chấp Quân',
     );
   }
 
