@@ -372,3 +372,53 @@ test('detectMoveMotif surfaces authentic Xiangqi kill patterns (Điếu Ngư Mã
 
 
 
+
+test('the motif honors the pattern tonight advertised, and never at the price of a truer one', () => {
+  // The advertised pattern wins when the board holds it: the cannon leaves the leg, the horse on
+  // (8,6) is both the uncovered check and tonight's ngọa tào outpost.
+  const uncovered = buildBoard(
+    [
+      { r: 0, c: 3, side: 'black', type: 'king' },
+      { r: 8, c: 5, side: 'black', type: 'cannon' },
+      { r: 8, c: 6, side: 'black', type: 'horse' },
+      { r: 9, c: 4, side: 'red', type: 'king' },
+      { r: 9, c: 3, side: 'red', type: 'advisor' },
+      { r: 9, c: 5, side: 'red', type: 'advisor' },
+    ],
+    'black',
+  );
+  const cannonPly = generateLegalMoves(uncovered.grid, 'black').find(
+    (m) => m.from.row === 8 && m.from.col === 5 && m.to.row === 7 && m.to.col === 5,
+  )!;
+  const afterCannon = makeMove(uncovered, cannonPly);
+  assert.equal(detectMoveMotif(uncovered.grid, cannonPly, afterCannon.grid), 'Bát Hoàng Mã');
+  assert.equal(
+    detectMoveMotif(uncovered.grid, cannonPly, afterCannon.grid, 'ngo_tao_ma'),
+    'Ngọa Tào Mã',
+    'the night that advertises the horse outpost gets to say so',
+  );
+
+  // A focus that is real but too quiet to be spoken must not cost the room the label it had: the
+  // horse holds the outpost, no check is given, and the chariot is digging out the palace centre.
+  const quiet = buildBoard(
+    [
+      { r: 0, c: 3, side: 'black', type: 'king' },
+      { r: 0, c: 5, side: 'black', type: 'advisor' },
+      { r: 1, c: 4, side: 'black', type: 'advisor' },
+      { r: 2, c: 4, side: 'black', type: 'elephant' },
+      { r: 1, c: 0, side: 'black', type: 'chariot' },
+      { r: 9, c: 4, side: 'red', type: 'king' },
+      { r: 9, c: 3, side: 'red', type: 'advisor' },
+      { r: 1, c: 8, side: 'red', type: 'chariot' },
+      { r: 1, c: 2, side: 'red', type: 'horse' },
+      { r: 3, c: 5, side: 'red', type: 'horse' },
+    ],
+    'red',
+  );
+  const digPly = generateLegalMoves(quiet.grid, 'red').find(
+    (m) => m.from.row === 1 && m.from.col === 8 && m.to.row === 1 && m.to.col === 4,
+  )!;
+  const afterDig = makeMove(quiet, digPly);
+  assert.ok(!isInCheck(afterDig.grid, 'black'), 'the dig itself gives no check');
+  assert.equal(detectMoveMotif(quiet.grid, digPly, afterDig.grid, 'ngo_tao_ma'), 'Đại Đao Hoạch Tâm');
+});

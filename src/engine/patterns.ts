@@ -408,7 +408,16 @@ function detectKhongDauPhao(grid: Grid, f: Frame, king: Coord): boolean {
   });
 }
 
-export function detectKillPattern(prevGrid: Grid, afterGrid: Grid, move: Move): KillPatternHit | null {
+/**
+ * `focus` is the pattern tonight advertised, and it outranks the table only when its own detector
+ * fired too: a night may prefer a quieter name over a louder one, never invent a tactic.
+ */
+export function detectKillPattern(
+  prevGrid: Grid,
+  afterGrid: Grid,
+  move: Move,
+  focus?: KillPatternId | null,
+): KillPatternHit | null {
   const f = frameOf(move.piece.side);
   const king = findKing(afterGrid, f.defender);
   if (!king) return null;
@@ -440,10 +449,13 @@ export function detectKillPattern(prevGrid: Grid, afterGrid: Grid, move: Move): 
   ];
 
   let best: KillPatternHit | null = null;
+  let bestRank = Number.NEGATIVE_INFINITY;
   for (const cand of candidates) {
     if (!cand.on) continue;
     const meta = PATTERN_META[cand.id];
-    if (!best || meta.priority > best.priority) {
+    const rank = cand.id === focus ? Number.POSITIVE_INFINITY : meta.priority;
+    if (rank > bestRank) {
+      bestRank = rank;
       best = { id: cand.id, nameVi: meta.nameVi, nameZh: meta.nameZh, forcing, priority: meta.priority };
     }
   }

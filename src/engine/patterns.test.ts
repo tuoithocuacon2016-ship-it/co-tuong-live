@@ -275,6 +275,36 @@ test('Bạch Kiểm Tướng needs the facing rule to be the decisive denial', (
   assert.ok(hit!.forcing);
 });
 
+test('a night may name the pattern it advertised, and never one the board does not hold', () => {
+  // The cannon steps off the horse's leg, so one horse is both the uncovered check (Bát Hoàng Mã)
+  // and the outpost the night advertises (Ngọa Tào Mã). Both detectors fire on the same ply.
+  const state = buildBoard(
+    [
+      { r: 0, c: 3, side: 'black', type: 'king' },
+      { r: 8, c: 5, side: 'black', type: 'cannon' },
+      { r: 8, c: 6, side: 'black', type: 'horse' },
+      { r: 9, c: 4, side: 'red', type: 'king' },
+      { r: 9, c: 3, side: 'red', type: 'advisor' },
+      { r: 9, c: 5, side: 'red', type: 'advisor' },
+    ],
+    'black',
+  );
+  const { hit, after, move } = play(state, { row: 8, col: 5 }, { row: 7, col: 5 });
+  assert.equal(
+    hit!.id,
+    'bat_hoang_ma',
+    'the priority table alone calls an uncovered check Bát Hoàng Mã',
+  );
+
+  const advertised = detectKillPattern(state.grid, after.grid, move, 'ngo_tao_ma');
+  assert.equal(advertised!.id, 'ngo_tao_ma');
+  assert.equal(advertised!.priority, 74, 'a hit reports its own priority, never the one it borrowed');
+  assert.equal(advertised!.forcing, hit!.forcing, 'the focus renames the ply, it never re-judges it');
+
+  const bought = detectKillPattern(state.grid, after.grid, move, 'dai_dao_hoach_tam');
+  assert.equal(bought!.id, 'bat_hoang_ma', 'a focus the board does not hold cannot buy the banner');
+});
+
 test('Pattern names are always Vietnamese-script, never raw Chinese glyphs', () => {
   const ids: KillPatternId[] = ['ngo_tao_ma', 'phao_nan_dan_sa', 'dai_dao_hoach_tam'];
   const state = buildBoard(

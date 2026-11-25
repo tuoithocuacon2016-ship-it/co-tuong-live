@@ -869,7 +869,14 @@ export default function App() {
         kind: side === 'red' ? 'move' : 'bot',
       });
 
-      const playedMotif = detectMoveMotif(currentBoard.grid, move, nextBoard.grid);
+      const playedMotif = detectMoveMotif(
+        currentBoard.grid,
+        move,
+        nextBoard.grid,
+        nightRef.current.focusPattern,
+      );
+      // The dowry follows the strongest pattern on the board, not the one tonight advertised: the
+      // focus decides what the room is told, never what the bride pays.
       const killStrike = detectKillPattern(currentBoard.grid, nextBoard.grid, move);
 
       // The dowry only moves when a checking pattern really lands on the bride, or when she
@@ -931,6 +938,7 @@ export default function App() {
           analyzePosition(nextBoard, difficultyRef.current, {
             mode: 'preview',
             recentPositionKeys: recentPosKeysRef.current,
+            focusPattern: nightRef.current.focusPattern,
           });
         const scoreDeltaForRed =
           precomputed?.scoreDeltaForRed ?? terminalAnalysis.score - prevScore;
@@ -997,6 +1005,7 @@ export default function App() {
               mode: 'play',
               recentPositionKeys: recentPosKeysRef.current,
               bookFavour: nightBookFavour(nightRef.current, nextBoard),
+              focusPattern: nightRef.current.focusPattern,
             }));
 
           if (
@@ -1136,6 +1145,7 @@ export default function App() {
         analyzePosition(nextBoard, difficultyRef.current, {
           mode: 'preview',
           recentPositionKeys: recentPosKeysRef.current,
+          focusPattern: nightRef.current.focusPattern,
         });
       if (nextAnalysis.positionKey) {
         recentPosKeysRef.current = [
