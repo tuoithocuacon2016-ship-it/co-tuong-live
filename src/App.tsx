@@ -147,12 +147,13 @@ const VALID_PIECE_THEMES = new Set<PieceThemeId>([
 ]);
 const VALID_LABEL_MODES = new Set<PieceLabelMode>(['han', 'han_viet', 'viet']);
 
-/** Tonight's rung on the concession ladder: the link outranks whatever the last broadcast left over. */
+/** Tonight's rung on the concession ladder: the link, then the saved pick, then the night's own. */
 function loadSavedConcession(): ConcessionChoice {
   if (typeof window === 'undefined') return EVEN_CONCESSION;
   return readConcessionFromSearch(
     window.location.search,
     window.localStorage.getItem(CONCESSION_STORAGE_KEY),
+    resolveNightTheme(new Date()).concession,
   );
 }
 

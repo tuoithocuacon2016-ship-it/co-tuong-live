@@ -21,7 +21,7 @@ import {
   serializeConcession,
   takesBothFlanks,
 } from './handicap';
-import type { Flank, HandicapId } from './handicap';
+import type { ConcessionChoice, Flank, HandicapId } from './handicap';
 import {
   cloneGrid,
   createInitialBoard,
@@ -724,4 +724,23 @@ test('a rung chip never keeps a flank the new rung cannot take', () => {
       assert.equal(offersFlankChoice(id), rung.removed.length === 1 || id === 'chap_mot_ma', id);
     }
   }
+});
+
+test('the evening proposes a rung and the operator can still overrule it', () => {
+  const night: ConcessionChoice = { id: 'chap_mot_ma', flank: 'ben_trai' };
+  // Link first: the broadcast is steered from the URL, and an unreadable value there must fall
+  // through to the night rather than to a broken board.
+  assert.deepEqual(readConcessionFromSearch('?chap=chap_mot_xe&flank=9', 'chap_hai_ma|ben_phai', night), {
+    id: 'chap_mot_xe',
+    flank: 'ben_phai',
+  });
+  // Then the saved pick, because an explicit choice should not vanish between reloads.
+  assert.deepEqual(readConcessionFromSearch('', 'chap_mot_phao|ben_phai', night), {
+    id: 'chap_mot_phao',
+    flank: 'ben_phai',
+  });
+  // An explicit even game on the link cancels the night's rung - that is the operator's call too.
+  assert.deepEqual(readConcessionFromSearch('?chap=khong_chap', 'junk', night), EVEN_CONCESSION);
+  assert.deepEqual(readConcessionFromSearch('?chap=chap_hai_xe', 'junk', night), night);
+  assert.deepEqual(readConcessionFromSearch('', undefined, undefined), EVEN_CONCESSION);
 });
