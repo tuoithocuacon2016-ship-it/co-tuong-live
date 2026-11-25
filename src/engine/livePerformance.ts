@@ -62,6 +62,7 @@ export type TacticalEventType =
 
 export interface PronounProfile {
   self: string;
+  selfCap: string;
   guest: string;
   guestCap: string;
   audience: string;
@@ -124,6 +125,7 @@ export function resolvePronounProfile(
     if (safeAge <= 32) {
       return {
         self: 'tỷ',
+        selfCap: 'Tỷ',
         guest: 'muội',
         guestCap: 'Muội',
         audience: 'cả phòng live',
@@ -134,6 +136,7 @@ export function resolvePronounProfile(
     }
     return {
       self: 'Điêu Nguyệt',
+      selfCap: 'Điêu Nguyệt',
       guest: 'tỷ tỷ',
       guestCap: 'Tỷ tỷ',
       audience: 'quan khách',
@@ -146,6 +149,7 @@ export function resolvePronounProfile(
   if (safeAge > 45) {
     return {
       self: 'tiểu nữ',
+      selfCap: 'Tiểu nữ',
       guest: 'tiền bối',
       guestCap: 'Tiền bối',
       audience: 'quan khách',
@@ -157,6 +161,7 @@ export function resolvePronounProfile(
 
   return {
     self: 'thiếp',
+    selfCap: 'Thiếp',
     guest: 'chàng',
     guestCap: 'Chàng',
     audience: 'hai họ',

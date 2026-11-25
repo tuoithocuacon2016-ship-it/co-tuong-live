@@ -383,7 +383,7 @@ export function buildLiveInteractionScript(params: {
   if (kind === 'backseat_coach') {
     const line = pickFresh(
       [
-        `Ơ kìa ${cleanViewer}... định phím nước cờ cho ${p.guest} hả? Thiếp nghe thấy hết rồi nha — ${p.audience} chứng giám giúp thiếp đi!`,
+        `Ơ kìa ${cleanViewer}... định phím nước cờ cho ${p.guest} hả? ${p.selfCap} nghe thấy hết rồi nha — ${p.audience} chứng giám giúp ${p.self} đi!`,
         `Ái chà ${cleanViewer} ơi! ${p.audience} đừng mách bài cho ${p.guest} chứ — để ${p.guest} tự đấu xem bản lĩnh tới đâu nào!`,
         `Hì hì... bắt quả tang ${cleanViewer} đang nhắc tuồng kìa! ${p.guestCap} mà nghe theo nước ấy thì cẩn thận sập bẫy của ${p.self} nha!`,
       ],
