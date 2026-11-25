@@ -313,17 +313,22 @@ export function parseConcession(raw: string | null | undefined): ConcessionChoic
 }
 
 /**
- * The URL outranks the stored rung: the operator steers the broadcast from the link, and a choice
- * left in localStorage must not outlive the game it was made for. `?chap=xe&flank=9` is enough -
- * `resolveHandicap` reads the flanks by name and by file number.
+ * What tonight is played for, in the order the show actually honors it: the link first, because the
+ * operator steers the broadcast from it; then the last saved pick, because an explicit choice should
+ * not vanish between reloads; then whatever the evening's theme proposes; then an even game.
+ * `?chap=xe&flank=9` is enough - `resolveHandicap` reads the flanks by name and by file number.
  */
-export function readConcessionFromSearch(search: string, stored?: string | null): ConcessionChoice {
+export function readConcessionFromSearch(
+  search: string,
+  stored?: string | null,
+  nightDefault?: ConcessionChoice | null,
+): ConcessionChoice {
   const params = new URLSearchParams(search.replace(/^[?#&]/, ''));
   const rawId = params.get('chap');
   if (rawId && HANDICAP_IDS.includes(rawId as HandicapId)) {
     return resolveHandicap(rawId, params.get('flank') ?? undefined);
   }
-  return parseConcession(stored) ?? EVEN_CONCESSION;
+  return parseConcession(stored) ?? nightDefault ?? EVEN_CONCESSION;
 }
 
 /**

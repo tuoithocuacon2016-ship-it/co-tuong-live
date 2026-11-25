@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { applyHandicap } from './handicap';
 import { createInitialBoard, generateLegalMoves, makeMove } from './xiangqi';
 import type { BoardState, Move } from './xiangqi';
 import { formatMoveVietnamese } from './notation';
@@ -295,5 +296,48 @@ test('night lines render through the same pronoun machinery as the bank', () => 
       seed: 0,
     });
     assert.equal(lastRemaining.line, spoken[spoken.length - 1]);
+  }
+});
+
+test('the night that concedes gives away the horse her own line does not ride', () => {
+  // Plan T5 puts 让単馬 on the evening whose hồi môn is the phoenix crown, and that is this night:
+  // its signature is the ngọa tào horse. The rung has to be playable on its own script, so no Black
+  // book ply may start from a square the concession empties - otherwise the evening's reply is a
+  // story about a stone that is not on the board.
+  const conceding = NIGHT_THEMES.filter((theme) => theme.concession);
+  assert.deepEqual(
+    conceding.map((theme) => theme.index),
+    [3],
+    'only the mũ phượng night proposes a rung',
+  );
+
+  for (const theme of conceding) {
+    const choice = theme.concession!;
+    assert.equal(choice.id, 'chap_mot_ma', `${theme.nameVi} is the horse night`);
+    const { board, handicap, ok, absent } = applyHandicap(createInitialBoard(), choice.id, choice.flank);
+    assert.ok(ok, 'a concession is only ever laid on the opening');
+    assert.deepEqual(absent, [], `${theme.nameVi} offered a rung with nothing to take`);
+    assert.ok(
+      handicap.shields.includes('thiet_binh'),
+      `${theme.nameVi} promises 铁兵 with the horse, and the ledger has to carry it`,
+    );
+
+    const given = new Set(handicap.removed.map((r) => `${r.at.row},${r.at.col}`));
+    for (const ply of [theme.answer, theme.follow]) {
+      assert.ok(
+        !given.has(`${ply.from.row},${ply.from.col}`),
+        `${theme.nameVi} scripts ${ply.notation} from a square the concession emptied`,
+      );
+    }
+
+    const invite = generateLegalMoves(board.grid, 'red').find(
+      (m) => sameSquare(m.from, theme.invite.from) && sameSquare(m.to, theme.invite.to),
+    );
+    assert.ok(invite, `${theme.nameVi} cannot even be invited under its own concession`);
+    assert.deepEqual(
+      nightBookFavour(theme, makeMove(board, invite)),
+      [{ from: theme.answer.from, to: theme.answer.to }],
+      `${theme.nameVi} loses its book nudge under the rung it proposes`,
+    );
   }
 });

@@ -7,6 +7,7 @@
  * files right-to-left (file = 9 - col) and Black left-to-right (file = col + 1).
  */
 
+import type { ConcessionChoice } from './handicap';
 import type { KillPatternId } from './patterns';
 import { patternNameVi } from './patterns';
 import type { DowryLayerId } from './bridalLadder';
@@ -55,6 +56,11 @@ export interface NightTheme {
   follow: NightBookPly;
   focusPattern: KillPatternId;
   headlineLayer: DowryLayerId;
+  /**
+   * The rung this evening proposes, when it plays a conceding game at all. It is only a default:
+   * the operator's link or last saved pick outranks it, and a night without one stays an even game.
+   */
+  concession?: ConcessionChoice;
   teases: NightTease[];
   /** [stage, bride look, overlay motif] asset ids for docs/art/IMAGE-SPEC.md. */
   assets: [string, string, string];
@@ -192,6 +198,10 @@ export const NIGHT_THEMES: readonly NightTheme[] = [
     follow: ply('black', 'horse', [0, 7], [2, 6], 'M8 tiến 7'),
     focusPattern: 'ngo_tao_ma',
     headlineLayer: 'mu_phuong',
+    // The night the club asks her to give a horse, and it has to be the left one: her own scripted
+    // reply here is M8 tiến 7, the (0,7) horse climbing to the ngọa tào square. Take that horse off
+    // and the evening's signature line is a story about a stone that is not on the board.
+    concession: { id: 'chap_mot_ma', flank: 'ben_trai' },
     teases: [
       {
         line: `{guest} mở bằng ngựa? Đêm nay {self} sẽ trả lời bằng pháo! {opening} của {guest} đã mở sẵn đường giữa - {self} chỉ việc bước vào.`,
