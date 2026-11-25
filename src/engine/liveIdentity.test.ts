@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  UNATTRIBUTED_ACTOR_ID,
   actorHandle,
   actorIdFor,
   displayHandle,
@@ -89,4 +90,29 @@ test('the challenger queue is keyed by actor, not by claimed name', () => {
   const again = enqueueChallenger([seated, relayLookalike], seated);
   assert.equal(again.length, 2, 'the same actor updates its own entry');
   assert.equal(again.find((q) => q.actorId === seated.actorId)?.age, 26);
+});
+
+test('an unattributed message is a stranger, and no handle can be one', () => {
+  // The receiver's fallback when a message carries no id. It has to be a value that minting can
+  // never produce, or "we could not establish the sender" quietly becomes "the sender is whoever
+  // this handle looks like" - which is the seat takeover this module exists to stop.
+  const lookalikes = ['unattributed', '@unattributed', '  unattributed  ', '@UNATTRIBUTED'];
+  for (const handle of lookalikes) {
+    for (const source of ['relay', 'local'] as const) {
+      assert.notEqual(
+        actorIdFor(source, handle),
+        UNATTRIBUTED_ACTOR_ID,
+        `${source}:${handle} must not be able to name itself unattributed`,
+      );
+    }
+  }
+
+  const owners = new Map<string, string>();
+  assert.notEqual(reserveActorId('@unattributed', owners), UNATTRIBUTED_ACTOR_ID);
+  assert.notEqual(
+    UNATTRIBUTED_ACTOR_ID,
+    actorIdFor('relay', '@KiemKhach_VN'),
+    'a stranger never matches the seated player',
+  );
+  assert.equal(isLocalActor(UNATTRIBUTED_ACTOR_ID), false, 'a stranger is never the operator');
 });

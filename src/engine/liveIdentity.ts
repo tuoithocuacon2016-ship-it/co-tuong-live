@@ -55,6 +55,17 @@ export function isLocalActor(actorId: string): boolean {
 }
 
 /**
+ * Stand-in for a message whose sender the receiver could not establish.
+ *
+ * It is deliberately NOT a mintable actor id: no `actor:`/`local:` prefix and no `@handle`, so it
+ * can never equal a real seat id. That is the point - when a caller omits attribution, the safe
+ * reading is "a stranger", not "whoever this handle looks like". Deriving an id from the typed
+ * handle instead would hand a lookalike the seated player's privileges, which is exactly the bug
+ * `reserveActorId` exists to close.
+ */
+export const UNATTRIBUTED_ACTOR_ID = 'unattributed';
+
+/**
  * TikTok uniqueIds carry no leading `@`, the board shows handles with one. Both
  * ingest routes normalize before minting, or the same viewer arriving via
  * `/api/live/chat` and via `/api/live/webhook` would be two different actors.
