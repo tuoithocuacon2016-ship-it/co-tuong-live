@@ -1,11 +1,24 @@
 import React from 'react';
 import { BoardState } from '../engine/xiangqi';
+import type { StatusReason } from '../engine/repetitionReferee';
 import { ChallengerEntry } from '../engine/matchmaker';
 import { BOT_MASTER_PROFILE } from '../data/characters';
+
+/**
+ * Referee endings overwrite the generic win/draw line so the stream explains the ruling.
+ * The three repetition strings are the ones the task card fixes verbatim.
+ */
+const REFEREE_SUBTITLES: Partial<Record<StatusReason, string>> = {
+  perpetual_check: 'Phạm luật Trường Chiếu — Đổi nước khác kẻo bị xử thua!',
+  repetition_draw: 'Hòa do lặp thế 3 lần — đúng thế cũ lặp lại, hai họ làm chứng, kỳ đài xử hòa.',
+  sixty_move_draw: 'Hòa theo luật 60 hiệp không ăn quân — 120 nửa nước trôi qua chẳng mất quân nào.',
+};
 
 interface StatusModalProps {
   mode: 'paused' | 'gameover';
   status: BoardState['status'];
+  /** Why the game ended; absent for states saved before the referee existed. */
+  statusReason?: StatusReason;
   moveCount: number;
   winProbRed: number;
   challenger: ChallengerEntry;
@@ -17,6 +30,7 @@ interface StatusModalProps {
 export const StatusModal: React.FC<StatusModalProps> = ({
   mode,
   status,
+  statusReason,
   moveCount,
   winProbRed,
   challenger,
@@ -33,13 +47,17 @@ export const StatusModal: React.FC<StatusModalProps> = ({
         ? 'Tân Nương Áo Đỏ Đắc Thắng!'
         : 'Phu Thê Bất Phân Thắng Bại';
 
-  const subtitle = isPaused
-    ? 'Phiên phát sóng đang tạm nghỉ. Khôi phục ngay để tiếp tục ván cờ đêm hoa chúc.'
-    : status === 'red_win'
+  const refereeSubtitle = statusReason ? REFEREE_SUBTITLES[statusReason] : undefined;
+  const defaultSubtitle =
+    status === 'red_win'
       ? 'Tuyệt kỹ xuất thần! Chàng thắng trọn ván cờ hoa chúc — hai họ làm chứng, thiếp giao lại một lớp hồi môn đúng như đã hẹn!'
       : status === 'black_win'
         ? 'Hì hì, hai họ làm chứng nhé! Tân Nương Áo Đỏ giữ vững kỳ đài, đêm nay chàng tự giác ôm gối ra hành lang ngắm trăng nha!'
         : 'Nội lực tương đồng, phu thê hòa khí thu cờ dưới ánh nến hồng.';
+
+  const subtitle = isPaused
+    ? 'Phiên phát sóng đang tạm nghỉ. Khôi phục ngay để tiếp tục ván cờ đêm hoa chúc.'
+    : refereeSubtitle ?? defaultSubtitle;
 
   return (
     <div

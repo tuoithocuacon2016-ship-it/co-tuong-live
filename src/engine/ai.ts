@@ -33,6 +33,7 @@ import {
 } from './xiangqiFast';
 import { colToFile, formatMoveVietnamese } from './notation';
 import { detectKillPattern } from './patterns';
+import { ledgerForBoard, losesByPerpetualCheck, recordForPosition } from './repetitionReferee';
 
 export type BotDifficulty = 'nhap_mon' | 'cao_thu' | 'tong_su';
 
@@ -938,6 +939,8 @@ export function analyzePosition(
 
   const bookBonuses = getOpeningBookBonuses(state.grid, side, state.moveCount);
   const recentSet = new Set(options?.recentPositionKeys ?? []);
+  const refereeLedger = ledgerForBoard(state);
+  const refereeActive = refereeLedger.length >= 3;
 
   // Pre-compute static bonus (opening book + repetition check) for every root move
   interface RootEntry {
@@ -945,6 +948,8 @@ export function analyzePosition(
     boardMove: Move;
     bookBonus: number;
     isRepeat: boolean;
+    /** Playing this ply would be the 3rd occurrence with this side as the perpetual checker. */
+    isLethal: boolean;
     scoreSide: number; // Side-to-move POV
     sortScore: number;
     isExact: boolean;
@@ -972,20 +977,46 @@ export function analyzePosition(
       unmakeMoveFast(fb, packed);
     }
 
+    let isLethal = false;
+    if (refereeActive) {
+      const afterGrid = applyMoveOnGrid(state.grid, boardMove);
+      isLethal = losesByPerpetualCheck(
+        refereeLedger,
+        recordForPosition({
+          grid: afterGrid,
+          turn: oppositeSide(side),
+          ply: state.moveCount + 1,
+          mover: side,
+          gaveCheck: isInCheck(afterGrid, oppositeSide(side)),
+          captured: boardMove.captured != null,
+        }),
+        side,
+      );
+    }
+
     const initOrder = scoreMoveFast(fb, packed, 0, 0) + bookBonus * 80;
     entries.push({
       packed,
       boardMove,
       bookBonus,
       isRepeat,
+      isLethal,
       scoreSide: 0,
       sortScore: initOrder,
       isExact: false,
     });
   }
 
-  // Initial root ordering: captures & classical opening candidates first
-  entries.sort((a, b) => b.sortScore - a.sortScore);
+  // Only dodge the losing repetition while an alternative exists; when every legal move is the
+  // losing one the result is already forced and best chess keeps playing the position cleanly.
+  const perpetualLossIsAvoidable = entries.some((entry) => !entry.isLethal);
+
+  // Initial root ordering: rule-losing shuffles last, then captures & classical opening candidates
+  entries.sort(
+    (a, b) =>
+      Number(perpetualLossIsAvoidable && a.isLethal) -
+        Number(perpetualLossIsAvoidable && b.isLethal) || b.sortScore - a.sortScore,
+  );
 
   const isPreview = options?.mode === 'preview';
   const maxDepth = isPreview
@@ -1102,6 +1133,11 @@ export function analyzePosition(
             sortScore -= 55; // Avoid shuffling/repeating when equal or winning!
           }
         }
+      }
+      // A repeated position that this side loses by Trường chiếu is not a draw: the search reports
+      // it as 0.00, so rank it below every safe alternative or Kỳ Ma happily "repeats to hold".
+      if (entry.isLethal && perpetualLossIsAvoidable) {
+        sortScore = -INF + i;
       }
 
       iterResults.push({

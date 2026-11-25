@@ -50,6 +50,9 @@ export type TacticalEventType =
   | 'under_pressure_bot'
   | 'opening_signature'
   | 'tense_endgame'
+  | 'perpetual_check_ruling'
+  | 'repetition_draw'
+  | 'sixty_move_draw'
   | 'balanced_duel';
 
 export interface PronounProfile {
@@ -169,6 +172,12 @@ export function classifyTacticalEvent(params: {
 }): TacticalEventType {
   const { boardAfter, move, analysis, scoreDeltaForRed, prevWinProbRed, phase } = params;
   const isBotMove = move.piece.side === 'black';
+
+  // The referee's own endings are the story beat — they outrank a generic "mate" line, and a
+  // perpetual-check loss is a rule ruling, not a finish on the board.
+  if (boardAfter.statusReason === 'perpetual_check') return 'perpetual_check_ruling';
+  if (boardAfter.statusReason === 'repetition_draw') return 'repetition_draw';
+  if (boardAfter.statusReason === 'sixty_move_draw') return 'sixty_move_draw';
 
   if (boardAfter.status === 'red_win') return 'checkmate_red';
   if (boardAfter.status === 'black_win' || boardAfter.status === 'draw') {
@@ -597,6 +606,66 @@ export function buildMovePerformanceScript(params: {
       ];
       break;
 
+    case 'perpetual_check_ruling': {
+      // The losing ply was just played, so the mover is the side the referee punished.
+      const doomed = move.piece.side === 'black' ? p.self : p.guest;
+      pool = [
+        {
+          line: `Ba vòng chiếu liên tiếp — đó là Trường Chiếu rồi ${doomed} ạ! Chiếu mãi mà lặp lại thế cũ là bị xử thua ngay tại kỳ đài, ${p.audience} làm chứng giúp nước cờ này nhé!`,
+          emotion: 'surprised',
+          gesture: 'closeup_talk',
+          stageDirection: 'Giọng nghiêm hơn một nhịp, tay đặt lên quân cờ vừa đi',
+          motif: 'Trường Chiếu Định Phận',
+        },
+        {
+          line: `Trọng tài đã gõ búa rồi ${doomed} ơi! Luật cờ tướng xử bên chiếu liên tục ba vòng lặp thế là thua — đổi nước khác sớm thì đâu tới nỗi này~`,
+          emotion: 'amused',
+          gesture: 'tease',
+          stageDirection: 'Nhếch mép trêu, đưa tay chỉ vòng lặp trên bàn cờ',
+          motif: 'Chiếu Mãi hóa Thua',
+        },
+      ];
+      break;
+    }
+
+    case 'repetition_draw':
+      pool = [
+        {
+          line: `Hòa do lặp thế 3 lần đó ${p.guest}! Đúng đường cũ quay về ba vòng, trọng tài xử hòa — muốn phân thắng bại thì phải đổi hướng, chứ cứ lặp vầy thì trăng tàn vẫn chưa xong ván~`,
+          emotion: 'calm',
+          gesture: 'sip_tea',
+          stageDirection: 'Thong thả nhấp trà, mỉm cười khép lại thế cờ lặp',
+          motif: 'Lặp Thế thu cờ',
+        },
+        {
+          line: `Ba lần cùng một thế cờ... ${p.audience} thấy đó, cả hai đều thuộc bài nhau rồi! Kỳ đài xử hòa — ván sau ${p.guest} mang thế mới lên đài nhé!`,
+          emotion: 'amused',
+          gesture: 'tease',
+          stageDirection: 'Che quạt cười, mời phòng live chờ ván tiếp theo',
+          motif: 'Kỳ Phùng Địch Thủ',
+        },
+      ];
+      break;
+
+    case 'sixty_move_draw':
+      pool = [
+        {
+          line: `Hòa theo luật 60 hiệp không ăn quân! Sáu mươi hiệp ròng rã mà chẳng mất quân nào — ${p.guest} phòng thủ chắc thật, nhưng ${p.audience} đang đòi sóng gió kia kìa~`,
+          emotion: 'thinking',
+          gesture: 'think_fan',
+          stageDirection: 'Quạt khẽ phe phẩy, ánh mắt vừa nể vừa trêu',
+          motif: 'Sáu Mươi Hiệp',
+        },
+        {
+          line: `Một trăm hai mươi nửa nước bình chân như vại... trọng tài xử hòa rồi ${p.guest} ạ! Cờ là phải chiến — ván sau thử mạnh tay hơn cho ${p.self} còn đất phản công nha!`,
+          emotion: 'amused',
+          gesture: 'closeup_talk',
+          stageDirection: 'Nghiêng đầu trêu ghẹo, nhắc đối thủ đừng thủ thế mãi',
+          motif: 'Bình Chân Như Vại',
+        },
+      ];
+      break;
+
     case 'balanced_duel':
     default:
       pool = [
@@ -636,6 +705,84 @@ export function buildMovePerformanceScript(params: {
     phase,
     phaseLabel,
     tacticalEvent,
+  };
+}
+
+/**
+ * The referee's early nudge: fired on the SECOND trip through a checking cycle, while the game is
+ * still playable and nobody has been ruled against yet. Deliberately soft — it teaches the
+ * Trường Chiếu rule before a ruling can land, and it lets the bride announce that she changes too.
+ */
+export function buildRepetitionWarningScript(params: {
+  /** Side that checks on every move of the repeated cycle. */
+  offender: 'red' | 'black';
+  challengerName: string;
+  guestGender: GuestGender;
+  guestAge: number;
+  moveCount: number;
+  recentLines?: string[];
+  seed?: number;
+}): PerformanceScript {
+  const {
+    offender,
+    challengerName,
+    guestGender,
+    guestAge,
+    moveCount,
+    recentLines = [],
+    seed = Date.now(),
+  } = params;
+
+  const p = resolvePronounProfile(guestGender, guestAge);
+  const shortGuest = challengerName.replace(/^@/, '') || p.guest;
+  const phase: MatchPhase =
+    moveCount <= 8 ? 'khai_cuoc' : moveCount >= 26 ? 'tan_cuoc' : 'trung_cuoc';
+  const phaseLabel = MATCH_PHASE_LABELS_VI[phase];
+
+  const pool: ScriptTemplate[] =
+    offender === 'red'
+      ? [
+          {
+            line: `Này ${p.guest}... ${p.self} để ý nãy giờ chàng chiếu đúng hai vòng lặp rồi đấy. Vòng thứ ba là phạm luật Trường Chiếu — thua luôn nha! Đổi nước khác đi, ${p.audience} đang xem bản lĩnh chứ đâu xem nước lặp~`,
+            emotion: 'thinking',
+            gesture: 'think_fan',
+            stageDirection: 'Quạt dừng giữa không trung, ánh mắt nhắc nhở nhẹ nhàng',
+            motif: 'Nhắc Luật Trường Chiếu',
+          },
+          {
+            line: `Khoan khoan ${shortGuest}... nước chiếu ấy đưa ${p.self} trở lại đúng thế cũ rồi! Ba vòng là trọng tài xử thua đấy — ${p.self} chưa muốn thắng theo cách này đâu nha!`,
+            emotion: 'amused',
+            gesture: 'tease',
+            stageDirection: 'Che quạt cười, khẽ gõ tay xuống thành kỳ đài',
+            motif: 'Hai Vòng Lặp',
+          },
+        ]
+      : [
+          {
+            line: `Ôi... ${p.self} mải chiếu thành ra lặp thế mất rồi! Ba vòng là bên chiếu bị xử thua, vậy nên nước này thiếp đổi hướng hẳn — chàng coi nhé~`,
+            emotion: 'surprised',
+            gesture: 'closeup_talk',
+            stageDirection: 'Mỉm cười tự nhận, chủ động rời khỏi thế chiếu cũ',
+            motif: 'Tự Đổi Nước',
+          },
+          {
+            line: `${p.audience} thấy rồi nha, ${p.self} vừa đi lại nước chiếu cũ hai vòng. Luật Trường Chiếu bắt bên chiếu phải đổi — nên nước tới thiếp đánh đường khác, khỏi ai trách ${p.self} được!`,
+            emotion: 'amused',
+            gesture: 'sip_tea',
+            stageDirection: 'Nhấp trà thong dong, công nhận luật trước phòng live',
+            motif: 'Luật Là Luật',
+          },
+        ];
+
+  const chosen = pickFresh(pool, recentLines, seed + moveCount * 7);
+  return {
+    line: chosen.line,
+    motif: chosen.motif ?? 'Trường Chiếu',
+    emotion: chosen.emotion,
+    gesture: chosen.gesture,
+    stageDirection: chosen.stageDirection,
+    phase,
+    phaseLabel,
   };
 }
 
