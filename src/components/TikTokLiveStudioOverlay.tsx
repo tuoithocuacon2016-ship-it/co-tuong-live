@@ -124,7 +124,7 @@ interface TikTokLiveStudioOverlayProps {
   ) => void;
   onPickFromQueue: (mode: 'fifo' | 'random' | string) => void;
   onResetMatch: () => void;
-  onTestWebhook: () => void;
+  onTestWebhook: (ingestToken: string) => void;
   pieceStyle: PieceVisualConfig;
   onCyclePieceTheme: () => void;
   onCyclePieceLabelMode: () => void;
@@ -231,6 +231,7 @@ export const TikTokLiveStudioOverlay: React.FC<TikTokLiveStudioOverlayProps> = (
   const [copiedWebhook, setCopiedWebhook] = useState(false);
 
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const webhookTokenRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     setChatUser(activeChallenger.username);
@@ -262,6 +263,14 @@ export const TikTokLiveStudioOverlay: React.FC<TikTokLiveStudioOverlayProps> = (
     if (!trimmed) return;
     onSubmitChat(chatUser.trim() || activeChallenger.username, trimmed);
     setChatText('');
+  };
+
+  const handleWebhookTestSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const input = webhookTokenRef.current;
+    const token = input?.value.trim() ?? '';
+    if (input) input.value = '';
+    onTestWebhook(token);
   };
 
   const handleCopyWebhook = () => {
@@ -1217,30 +1226,44 @@ export const TikTokLiveStudioOverlay: React.FC<TikTokLiveStudioOverlayProps> = (
               <div className="text-[10px] font-semibold text-[#d9b673]">
                 Webhook TikFinity / TikTok Live
               </div>
-              <div className="flex items-center gap-1">
-                <input
-                  type="text"
-                  readOnly
-                  aria-label="Webhook URL Studio"
-                  value={webhookUrl}
-                  className="flex-1 min-w-0 px-2 py-1 rounded bg-[#18131c] border border-[#d4a44e]/25 font-mono-num text-[10px] text-[#dfd1ba]"
-                />
-                <button
-                  type="button"
-                  onClick={handleCopyWebhook}
-                  title="Chép URL Webhook"
-                  className="px-2 py-1 rounded bg-[#251f29] text-[#f3dfb6] text-[10px] border border-[#d4a44e]/30 flex items-center gap-1 cursor-pointer shrink-0"
-                >
-                  <Copy className="w-3 h-3" />
-                  {copiedWebhook ? 'Đã chép' : 'Chép'}
-                </button>
-                <button
-                  type="button"
-                  onClick={onTestWebhook}
-                  className="px-2 py-1 rounded bg-[#8f261f] text-[#fdf4e3] text-[10px] font-medium cursor-pointer shrink-0"
-                >
-                  Thử
-                </button>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    readOnly
+                    aria-label="Webhook URL Studio"
+                    value={webhookUrl}
+                    className="flex-1 min-w-0 px-2 py-1 rounded bg-[#18131c] border border-[#d4a44e]/25 font-mono-num text-[10px] text-[#dfd1ba]"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCopyWebhook}
+                    title="Chép URL Webhook"
+                    className="px-2 py-1 rounded bg-[#251f29] text-[#f3dfb6] text-[10px] border border-[#d4a44e]/30 flex items-center gap-1 cursor-pointer shrink-0"
+                  >
+                    <Copy className="w-3 h-3" />
+                    {copiedWebhook ? 'Đã chép' : 'Chép'}
+                  </button>
+                </div>
+                <form onSubmit={handleWebhookTestSubmit} className="flex items-center gap-1">
+                  <input
+                    ref={webhookTokenRef}
+                    type="password"
+                    autoComplete="off"
+                    aria-label="Token ingest Studio"
+                    placeholder="Token ingest tạm thời"
+                    className="flex-1 min-w-0 px-2 py-1 rounded bg-[#18131c] border border-[#d4a44e]/25 text-[10px] text-[#dfd1ba]"
+                  />
+                  <button
+                    type="submit"
+                    className="px-2 py-1 rounded bg-[#8f261f] text-[#fdf4e3] text-[10px] font-medium cursor-pointer shrink-0"
+                  >
+                    Thử
+                  </button>
+                </form>
+                <p className="text-[9px] text-[#9f907b] leading-snug">
+                  Token chỉ dùng cho lần thử này, bị xóa ngay và không được lưu lại.
+                </p>
               </div>
             </div>
           </div>

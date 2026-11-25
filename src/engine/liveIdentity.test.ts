@@ -4,6 +4,7 @@ import {
   UNATTRIBUTED_ACTOR_ID,
   actorHandle,
   actorIdFor,
+  buildLiveWebhookTestRequest,
   displayHandle,
   isLocalActor,
   reserveActorId,
@@ -25,6 +26,26 @@ test('ingest is closed unless a real token is configured', () => {
     'the .env.example placeholder is public in this repo, so it must not count',
   );
   assert.equal(resolveIngestToken('  s3cret-value  '), 's3cret-value');
+});
+
+test('Studio webhook test puts the ephemeral token only in the ingest header', () => {
+  const request = buildLiveWebhookTestRequest({
+    ingestToken: '  temporary-test-token  ',
+    uniqueId: 'KiemKhach_VN',
+    comment: 'p2 bình 5',
+  });
+
+  assert.equal(request.url, '/api/live/webhook');
+  assert.equal(request.method, 'POST');
+  assert.deepEqual(request.headers, {
+    'Content-Type': 'application/json',
+    'x-ctl-ingest-token': 'temporary-test-token',
+  });
+  assert.deepEqual(JSON.parse(request.body), {
+    uniqueId: 'KiemKhach_VN',
+    comment: 'p2 bình 5',
+  });
+  assert.doesNotMatch(`${request.url} ${request.body}`, /temporary-test-token/);
 });
 
 test('a handle is display text: control characters are stripped, length capped', () => {

@@ -36,6 +36,27 @@ export function resolveIngestToken(raw: string | undefined): string | undefined 
   return trimmed;
 }
 
+export function buildLiveWebhookTestRequest(args: {
+  ingestToken: string;
+  uniqueId: string;
+  comment: string;
+}): {
+  url: '/api/live/webhook';
+  method: 'POST';
+  headers: { 'Content-Type': 'application/json'; 'x-ctl-ingest-token': string };
+  body: string;
+} {
+  return {
+    url: '/api/live/webhook',
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-ctl-ingest-token': args.ingestToken.trim(),
+    },
+    body: JSON.stringify({ uniqueId: args.uniqueId, comment: args.comment }),
+  };
+}
+
 /** Trim, drop control characters, and cap the length of a viewer-chosen handle. */
 export function sanitizeHandle(raw: unknown, fallback: string = DEFAULT_HANDLE): string {
   if (typeof raw !== 'string') return fallback;

@@ -109,7 +109,12 @@ import {
   tallyCrowdVotes,
   triageLiveComment,
 } from './engine/liveInteraction';
-import { UNATTRIBUTED_ACTOR_ID, actorIdFor, reserveActorId } from './engine/liveIdentity';
+import {
+  UNATTRIBUTED_ACTOR_ID,
+  actorIdFor,
+  buildLiveWebhookTestRequest,
+  reserveActorId,
+} from './engine/liveIdentity';
 import {
   CameraPreset,
   MoveLandingPayload,
@@ -2835,15 +2840,27 @@ export default function App() {
     [commentary, hostEmotion, muted, triggerBotSpeaking, voiceEnabled],
   );
 
-  const handleTestWebhook = useCallback(async () => {
+  const handleTestWebhook = useCallback(async (ingestToken: string) => {
+    const token = ingestToken.trim();
+    if (!token) {
+      appendMessage({
+        username: 'Hệ thống',
+        text: 'Nhập token ingest tạm thời trước khi thử webhook; token sẽ không được lưu lại.',
+        kind: 'system',
+      });
+      return;
+    }
+
     try {
-      const resp = await fetch('/api/live/webhook', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          uniqueId: activeChallengerRef.current.username.replace(/^@/, ''),
-          comment: boardRef.current.moveCount === 0 ? 'p2 bình 5' : 'Chào Kỳ Ma từ TikTok Live Webhook!',
-        }),
+      const request = buildLiveWebhookTestRequest({
+        ingestToken: token,
+        uniqueId: activeChallengerRef.current.username.replace(/^@/, ''),
+        comment: boardRef.current.moveCount === 0 ? 'p2 bình 5' : 'Chào Kỳ Ma từ TikTok Live Webhook!',
+      });
+      const resp = await fetch(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: request.body,
       });
       if (!resp.ok) {
         const payload = await resp.json().catch(() => ({}));
@@ -2858,7 +2875,13 @@ export default function App() {
                 : `Webhook phản hồi mã ${resp.status}.`,
           kind: 'system',
         });
+        return;
       }
+      appendMessage({
+        username: 'Hệ thống',
+        text: `Webhook thử nghiệm thành công (${resp.status}): server đã nhận và phát sự kiện qua SSE.`,
+        kind: 'system',
+      });
     } catch {
       appendMessage({
         username: 'Hệ thống',
