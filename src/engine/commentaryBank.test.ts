@@ -136,18 +136,18 @@ test('no broadcast copy makes the bride the prize of a bet', () => {
       return /\.tsx?$/.test(entry.name) && !entry.name.endsWith('.test.ts') ? [full] : [];
     });
 
-  let scanned = 0;
-  for (const file of walk(SRC_DIR)) {
-    scanned += 1;
-    const text = readFileSync(file, 'utf8');
+  const files = walk(SRC_DIR).map((file) => path.relative(SRC_DIR, file));
+  // Counting files would break the moment someone adds a module; what the guard actually needs
+  // is proof that the walk reached the two places broadcast copy can hide.
+  for (const required of ['App.tsx', path.join('engine', 'commentaryBank.ts')]) {
+    assert.ok(files.includes(required), `the wording scan never read ${required}`);
+  }
+  for (const file of files) {
+    const text = readFileSync(path.join(SRC_DIR, file), 'utf8');
     for (const pattern of banned) {
-      assert.ok(
-        !pattern.test(text),
-        `${path.relative(SRC_DIR, file)} matches the banned wording ${pattern}`,
-      );
+      assert.ok(!pattern.test(text), `${file} matches the banned wording ${pattern}`);
     }
   }
-  assert.ok(scanned > 40, `guard barely scanned anything: ${scanned} files`);
 });
 
 test('commentary ships Vietnamese copy, not engine-internal Chinese labels', () => {
