@@ -1,6 +1,7 @@
 import { GuestGender, WuxiaCharacterProfile, matchGuestCharacter } from '../data/characters';
 import { DeepAnalysisResult } from './ai';
 import { BoardState, Move } from './xiangqi';
+import type { KillPatternId } from './patterns';
 import { HostEmotion } from '../scene/portraitKinematics';
 import {
   PerformanceGesture,
@@ -126,6 +127,8 @@ export function buildInstantWuxiaCommentary(params: {
   prevWinProbRed?: number;
   recentLines?: string[];
   ladderStep?: number;
+  /** The sát pháp named on the banner for this ply - decides which bank the line is read from. */
+  killPatternId?: KillPatternId | null;
 }): CommentaryItem {
   const {
     boardAfter,
@@ -141,6 +144,7 @@ export function buildInstantWuxiaCommentary(params: {
     prevWinProbRed,
     recentLines = [],
     ladderStep = 0,
+    killPatternId = null,
   } = params;
 
   const script = buildMovePerformanceScript({
@@ -155,6 +159,7 @@ export function buildInstantWuxiaCommentary(params: {
     prevWinProbRed,
     recentLines,
     ladderStep,
+    killPatternId,
   });
 
   return {

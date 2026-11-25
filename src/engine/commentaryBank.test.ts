@@ -3,10 +3,23 @@ import test from 'node:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CommentaryTier, COMMENTARY_TOKENS, TIERED_BANK, commentaryTier, tierPool } from './commentaryBank';
+import {
+  BANKED_KILL_PATTERNS,
+  COMMENTARY_TIERS,
+  CommentaryTier,
+  COMMENTARY_TOKENS,
+  TIERED_BANK,
+  bankedPools,
+  commentaryTier,
+  killPatternPool,
+  tierPool,
+} from './commentaryBank';
+import type { KillPatternId } from './patterns';
+import { NIGHT_THEMES } from './nightThemes';
 import {
   buildMovePerformanceScript,
   resolvePronounProfile,
+  renderSpeechTokens,
   shouldVoiceCommentary,
   TacticalEventType,
 } from './livePerformance';
@@ -15,7 +28,7 @@ import { createInitialBoard, generateLegalMoves, makeMove } from './xiangqi';
 
 const SRC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-const TIERS: CommentaryTier[] = ['do_dai', 'soc', 'khong_mu_phuong'];
+const TIERS: CommentaryTier[] = COMMENTARY_TIERS;
 
 function openingPosition() {
   const board0 = createInitialBoard();
@@ -64,40 +77,72 @@ test('every ruling the referee can hand down has a tiered delivery', () => {
   }
 });
 
-test('every banked tactical event carries three fresh lines per tier', () => {
+test('every banked pool carries three fresh lines per tier', () => {
   const events = Object.keys(TIERED_BANK) as TacticalEventType[];
   assert.ok(events.length >= 19, `every event the referee and the engine can name should be banked, got ${events.length}`);
 
-  for (const event of events) {
-    const seenPerEvent = new Set<string>();
-    for (const tier of TIERS) {
-      const entries = tierPool(event, tier);
-      assert.equal(entries.length, 3, `${event}/${tier} needs its own three deliveries`);
-      for (const entry of entries) {
-        assert.ok(entry.line.length > 30, `${event}/${tier} line is too thin to broadcast`);
-        assert.ok(entry.stageDirection.length > 10, `${event}/${tier} has no stage business`);
-        assert.ok(entry.gesture.length > 2, `${event}/${tier} has no gesture`);
-        assert.ok(entry.emotion.length > 2, `${event}/${tier} has no emotion`);
-        assert.ok(!seenPerEvent.has(entry.line), `${event}/${tier} repeats a line`);
-        seenPerEvent.add(entry.line);
-      }
+  // One walk over `bankedPools` instead of a loop per bank: a pattern bank added tomorrow inherits
+  // every invariant below the moment it exists, and cannot quietly skip the quota check.
+  const seenPerPool = new Map<string, Set<string>>();
+  for (const { id, tier, entries } of bankedPools()) {
+    const label = `${id}/${tier}`;
+    const seen = seenPerPool.get(id) ?? new Set<string>();
+    assert.equal(entries.length, 3, `${label} needs its own three deliveries`);
+    for (const entry of entries) {
+      assert.ok(entry.line.length > 30, `${label} line is too thin to broadcast`);
+      assert.ok(entry.stageDirection.length > 10, `${label} has no stage business`);
+      assert.ok(entry.gesture.length > 2, `${label} has no gesture`);
+      assert.ok(entry.emotion.length > 2, `${label} has no emotion`);
+      assert.ok(!seen.has(entry.line), `${label} repeats a line`);
+      seen.add(entry.line);
     }
-    assert.equal(seenPerEvent.size, 9, `${event} must hold nine distinct lines`);
+    seenPerPool.set(id, seen);
+  }
+  for (const [id, seen] of seenPerPool) {
+    assert.equal(seen.size, 9, `${id} must hold nine distinct lines`);
+  }
+});
+
+test('the sát pháp the rotation advertises are exactly the ones the bank can speak', () => {
+  // A night that advertises a pattern with no copy of its own would fall back to generic check
+  // lines while the banner names something specific - the mismatch the whole bank exists to kill.
+  const advertised = NIGHT_THEMES.map((theme) => theme.focusPattern).sort();
+  assert.deepEqual(
+    [...BANKED_KILL_PATTERNS].sort(),
+    advertised,
+    'every advertised pattern needs a voice, and no voice may be spent on a night nobody claims',
+  );
+  assert.equal(killPatternPool('ma_hau_phao', 'soc').length, 0, 'unbanked pattern must fall back');
+  assert.equal(killPatternPool('ngo_tao_ma', null).length, 0, 'no tier means no tiered delivery');
+});
+
+test('every banked pattern speaks for both sides of the shape', () => {
+  // Copy that only ever means "she did it" would misattribute half the tactics the room watches, and
+  // copy that only concedes would have her apologise for her own good moves. The opening tier is the
+  // one deliberate exception: she does not concede a shape inside the first six plies of the night.
+  for (const id of BANKED_KILL_PATTERNS) {
+    const all = COMMENTARY_TIERS.flatMap((tier) => killPatternPool(id, tier));
+    assert.equal(all.length, 9, `${id} must hold three lines per tier`);
+    assert.equal(all.filter((entry) => (entry.by ?? 'self') === 'guest').length >= 2, true, `${id} never concedes`);
+
+    for (const tier of COMMENTARY_TIERS) {
+      const pool = killPatternPool(id, tier);
+      const hers = killPatternPool(id, tier, 'self').length;
+      const theirs = pool.length - hers;
+      assert.ok(hers >= 1, `${id}/${tier} has nothing for her own shape`);
+      if (tier === 'do_dai') assert.equal(theirs, 0, `${id}/${tier} concedes too early`);
+      else assert.ok(theirs >= 1, `${id}/${tier} has nothing to concede`);
+    }
   }
 });
 
 test('the bank talks through tokens the renderer actually substitutes', () => {
   const known = new Set<string>(COMMENTARY_TOKENS);
-  for (const event of Object.keys(TIERED_BANK) as TacticalEventType[]) {
-    for (const tier of TIERS) {
-      for (const entry of tierPool(event, tier)) {
-        for (const field of [entry.line, entry.stageDirection]) {
-          for (const token of field.match(/\{(\w+)\}/g) ?? []) {
-            assert.ok(
-              known.has(token.slice(1, -1)),
-              `${event}/${tier} uses unknown token ${token}`,
-            );
-          }
+  for (const { id, tier, entries } of bankedPools()) {
+    for (const entry of entries) {
+      for (const field of [entry.line, entry.stageDirection]) {
+        for (const token of field.match(/\{(\w+)\}/g) ?? []) {
+          assert.ok(known.has(token.slice(1, -1)), `${id}/${tier} uses unknown token ${token}`);
         }
       }
     }
@@ -108,18 +153,13 @@ test('the bank never hardcodes an honorific, only the profile token that carries
   // 'chàng/thiếp' is the bridal register; an elder gets 'tiền bối' and a sister gets 'muội'.
   // A literal in the data silently breaks the xưng hô rule the whole stream is built on.
   const literalRegister = /\b(chàng|thiếp)\b|hai họ/i;
-  for (const event of Object.keys(TIERED_BANK) as TacticalEventType[]) {
-    for (const tier of TIERS) {
-      for (const entry of tierPool(event, tier)) {
-        assert.ok(
-          !literalRegister.test(entry.line),
-          `${event}/${tier} hardcodes a register: ${entry.line}`,
-        );
-        assert.ok(
-          !literalRegister.test(entry.stageDirection),
-          `${event}/${tier} hardcodes a register on stage: ${entry.stageDirection}`,
-        );
-      }
+  for (const { id, tier, entries } of bankedPools()) {
+    for (const entry of entries) {
+      assert.ok(!literalRegister.test(entry.line), `${id}/${tier} hardcodes a register: ${entry.line}`);
+      assert.ok(
+        !literalRegister.test(entry.stageDirection),
+        `${id}/${tier} hardcodes a register on stage: ${entry.stageDirection}`,
+      );
     }
   }
 });
@@ -163,15 +203,13 @@ test('no broadcast copy makes the bride the prize of a bet', () => {
 
 test('commentary ships Vietnamese copy, not engine-internal Chinese labels', () => {
   const cjk = /[\u3400-\u9FFF\u3040-\u30FF]/;
-  for (const event of Object.keys(TIERED_BANK) as TacticalEventType[]) {
-    for (const tier of TIERS) {
-      for (const entry of tierPool(event, tier)) {
-        assert.ok(!cjk.test(entry.line), `${event}/${tier} leaked a Chinese glyph into a spoken line`);
-        assert.ok(
-          !cjk.test(entry.stageDirection),
-          `${event}/${tier} leaked a Chinese glyph into stage text`,
-        );
-      }
+  for (const { id, tier, entries } of bankedPools()) {
+    for (const entry of entries) {
+      assert.ok(!cjk.test(entry.line), `${id}/${tier} leaked a Chinese glyph into a spoken line`);
+      assert.ok(
+        !cjk.test(entry.stageDirection),
+        `${id}/${tier} leaked a Chinese glyph into stage text`,
+      );
     }
   }
 });
@@ -298,4 +336,80 @@ test('quiet plies only move the banner, loud plies get her voice', () => {
     }),
     true,
   );
+});
+
+test('a named sát pháp gets copy that takes sides, and never the wrong side', () => {
+  // Pattern lines are written in her voice and they claim who owns the shape: she taunts with her own
+  // horse, and she concedes a horse the challenger planted. Both readings have to be reachable, and
+  // neither may be spoken when the banner shows a different name than the line does.
+  const board0 = createInitialBoard();
+  let mid = board0;
+  for (let i = 0; i < 16 && mid.status === 'playing'; i++) {
+    const ms = generateLegalMoves(mid.grid, mid.turn);
+    assert.ok(ms.length > 0);
+    mid = makeMove(mid, ms[i % ms.length]);
+  }
+  const blackPly = generateLegalMoves(mid.grid, 'black')[0];
+  const redPly = generateLegalMoves(mid.grid, 'red')[0];
+  assert.ok(blackPly && redPly, 'both sides still have moves to speak about');
+  const blackAfter = makeMove(mid, blackPly);
+  const redAfter = makeMove(mid, redPly);
+  const base = {
+    boardAfter: blackAfter,
+    move: blackPly,
+    playedMotif: 'Ngọa Tào Mã',
+    analysis: analyzePosition(blackAfter, 'nhap_mon'),
+    challengerName: '@KiemKhach_VN',
+    guestGender: 'nam' as const,
+    guestAge: 26,
+    scoreDeltaForRed: 0,
+    recentLines: [] as string[],
+    ladderStep: 3,
+    killPatternId: 'ngo_tao_ma' as KillPatternId | null,
+  };
+  const spoken = (over: Partial<typeof base>) =>
+    buildMovePerformanceScript({ ...base, ...over }).line;
+  const render = (line: string) =>
+    renderSpeechTokens(line, {
+      guestGender: 'nam',
+      guestAge: 26,
+      challengerName: '@KiemKhach_VN',
+    });
+
+  const hers = killPatternPool('ngo_tao_ma', 'khong_mu_phuong', 'self').map((entry) => render(entry.line));
+  const admitted = killPatternPool('ngo_tao_ma', 'soc', 'guest').map((entry) => render(entry.line));
+  assert.ok(hers.length > 0 && admitted.length > 0, 'both readings of one pattern need copy');
+
+  const byHer = spoken({});
+  assert.ok(hers.includes(byHer), `she did not get her own pattern: ${byHer}`);
+  assert.ok(!admitted.includes(byHer), `she conceded a shape she actually holds: ${byHer}`);
+
+  // A 400-centipawn swing against her and no dowry lost: the shaken tier, and the guest owns it.
+  const byGuest = spoken({
+    move: redPly,
+    boardAfter: redAfter,
+    analysis: analyzePosition(redAfter, 'nhap_mon'),
+    ladderStep: 0,
+    scoreDeltaForRed: 400,
+  });
+  assert.ok(admitted.includes(byGuest), `she would not name the tactic that beat her: ${byGuest}`);
+  assert.ok(!hers.includes(byGuest), `she claimed the challenger's shape: ${byGuest}`);
+
+  // The banner named something else, so the line may not smuggle a second tactic into the same ply.
+  const mislabelled = spoken({ playedMotif: 'Bát Hoàng Mã' });
+  assert.ok(!hers.includes(mislabelled) && !admitted.includes(mislabelled), `two tactics on one ply: ${mislabelled}`);
+
+  // A real pattern the bank never got copy for falls back, instead of reciting an empty pool.
+  const unbanked = spoken({ killPatternId: 'khong_dau_phao', playedMotif: 'Không Đầu Pháo' });
+  assert.ok(unbanked.length > 30, 'an unbanked pattern still has to be answered out loud');
+  assert.ok(!hers.includes(unbanked) && !admitted.includes(unbanked), 'a pattern with no copy borrowed someone else');
+
+  // Three deliveries spent: the tier pool takes over, the show does not repeat itself.
+  const exhausted = spoken({ recentLines: hers });
+  assert.ok(!hers.includes(exhausted), `the pattern pool repeated itself: ${exhausted}`);
+  assert.ok(exhausted.length > 30, 'the tier fallback still says something');
+
+  // The bold opening tier has no concession copy: an early tactic from the challenger is answered by
+  // the event pool, which is honest - she does not concede in the sixth ply of the opening.
+  assert.equal(killPatternPool('ngo_tao_ma', 'do_dai', 'guest').length, 0);
 });

@@ -1,5 +1,6 @@
 import type { PerformanceGesture, TacticalEventType } from './livePerformance';
 import type { HostEmotion } from '../scene/portraitKinematics';
+import type { KillPatternId } from './patterns';
 
 /**
  * Four ways the same tactical event can sound. `thuong` is the base pool already living in
@@ -15,7 +16,15 @@ export interface BankEntry {
   stageDirection: string;
   /** Empty means "reuse the motif the engine already named for this ply". */
   motif?: string;
+  /**
+   * Kill-pattern copy only: whose shape the line speaks of. She does not narrate her own horse when
+   * the challenger is the one holding it - and the room hears the difference. Absent means hers.
+   */
+  by?: PatternHolder;
 }
+
+/** Whose shape a pattern line is about: the bride's own, or the one just landed on her. */
+export type PatternHolder = 'self' | 'guest';
 
 /**
  * Lines are data, not template literals: the tokens below are substituted by the caller, so the
@@ -1242,4 +1251,440 @@ export function tierPool(
 ): BankEntry[] {
   if (!tier) return [];
   return TIERED_BANK[event]?.[tier] ?? [];
+}
+
+export const COMMENTARY_TIERS: CommentaryTier[] = ['do_dai', 'soc', 'khong_mu_phuong'];
+
+/**
+ * The six sát pháp the rotation advertises get a voice of their own, keyed by pattern instead of by
+ * tactical event: the banner has named them for months while the room only ever heard generic check
+ * copy. Two rules hold here. A pattern line describes the shape on the board and never its outcome -
+ * only the referee and the engine get to end a game. And the pool is spent only when the bride is the
+ * one holding the pattern, because this copy is written in her voice, about her own pieces.
+ */
+const KILL_PATTERN_BANK: Partial<Record<KillPatternId, Record<CommentaryTier, BankEntry[]>>> = {
+  qua_giac_ma: {
+    do_dai: [
+      {
+        line: 'Ngựa treo đúng góc cung — {motif} đó {audience}. Đường lui của {guest} bị cắt mất một nửa rồi nha.',
+        emotion: 'check',
+        gesture: 'closeup_talk',
+        stageDirection: 'Chỉ mũi quạt vào góc cung, gật gù',
+      },
+      {
+        line: 'Ngựa đứng góc cung, quạt kề má. {guest} thấy bài này quen chưa? Sách vỡ lòng ai cũng học một lần.',
+        emotion: 'amused',
+        gesture: 'tease',
+        stageDirection: 'Kè quạt sát má, nháy mắt với ống kính',
+      },
+      {
+        line: 'Chưa chiếu ngay đâu, nhưng ngựa nằm góc cung thì đi đâu cũng vướng vó, {name} à.',
+        emotion: 'thinking',
+        gesture: 'think_fan',
+        stageDirection: 'Gạt nhẹ quạt qua bốn ô quanh cung',
+      },
+    ],
+    soc: [
+      {
+        line: 'Góc cung của {guest} vừa mở một ô — {motif} {self} treo ở đó, và {self} chưa định gỡ xuống đâu {audience}.',
+        emotion: 'fierce',
+        gesture: 'closeup_talk',
+        stageDirection: 'Đặt mã vào góc cung, ngón tay giữ quân một nhịp lâu',
+      },
+      {
+        line: 'Nước này {self} không cãi: {motif} là {guest} đi đúng sách. Đúng sách và đỡ được là hai chuyện khác nhau {audience} ạ.',
+        emotion: 'thinking',
+        gesture: 'think_fan',
+        stageDirection: 'Gật đầu công nhận, rồi miết ngón tay lên mặt bàn',
+        by: 'guest',
+      },
+      {
+        line: '{self} suýt mất xe vì cái góc cung đó. Dân chơi cờ sợ nhất con ngựa đứng chéo, nhớ nhé {name}.',
+        emotion: 'calm',
+        gesture: 'sip_tea',
+        stageDirection: 'Uống trà lấy lại bình tĩnh, tay còn run nhẹ',
+        by: 'guest',
+      },
+    ],
+    khong_mu_phuong: [
+      {
+        line: 'Mất mũ phượng rồi mà {self} vẫn thấy góc cung của {guest} chật như ao làng. {motif} chưa phải hết đâu.',
+        emotion: 'fierce',
+        gesture: 'closeup_talk',
+        stageDirection: 'Chống hai tay lên bàn, nhìn thẳng vào đối phương',
+      },
+      {
+        line: '{motif} đẹp thật, nhưng {self} đứng góc cung cả chục ván rồi, {name} à.',
+        emotion: 'amused',
+        gesture: 'tease',
+        stageDirection: 'Cười khẩy, quạt phe phẩy vẻ không vội',
+        by: 'guest',
+      },
+      {
+        line: 'Không còn lớp nào để mất, {self} mới dám cãi: góc cung đó chưa khép đâu {audience}.',
+        emotion: 'calm',
+        gesture: 'think_fan',
+        stageDirection: 'Mở quạt chậm, ánh mắt lần theo từng ô thoát',
+      },
+    ],
+  },
+  bach_kiem_tuong: {
+    do_dai: [
+      {
+        line: 'Hai ông vua nhìn nhau rồi {audience} ạ. Không quân nào che giữa, là một bên phải quay đi.',
+        emotion: 'check',
+        gesture: 'closeup_talk',
+        stageDirection: 'Kẻ một đường thẳng bằng quạt từ tướng này sang tướng kia',
+      },
+      {
+        line: '{motif} — {self} không cần thêm quân nào để buộc {guest} quay mặt. {name} coi thử xem.',
+        emotion: 'amused',
+        gesture: 'tease',
+        stageDirection: 'Nhướng mày, tay vỗ nhẹ lên mặt bàn',
+      },
+      {
+        line: 'Trông mặt nhau thế này thì ai cũng phải dè chừng, {name} ạ. Đó là luật, không phải {self} doạ.',
+        emotion: 'thinking',
+        gesture: 'think_fan',
+        stageDirection: 'Gấp quạt, gõ đầu quạt theo nhịp từng chữ',
+      },
+    ],
+    soc: [
+      {
+        line: 'Ố... {guest} mở cột giữa toang thế kia thì {self} chỉ việc nhìn mặt thôi. Đau đấy {audience} ơi.',
+        emotion: 'surprised',
+        gesture: 'closeup_talk',
+        stageDirection: 'Hé mắt nhìn lên cột giữa, tay khựng lại',
+      },
+      {
+        line: '{motif} dựng được là do {self} để trống cột ấy. {audience} thấy rồi đấy, {self} không đổ cho ai.',
+        emotion: 'fierce',
+        gesture: 'think_fan',
+        stageDirection: 'Tự nhận bằng một cái gật, môi mím chặt',
+        by: 'guest',
+      },
+      {
+        line: '{self} quên mất luật mặt đối mặt. Thôi, uống ngụm trà rồi tính lại, {guest} cứ đi tiếp đi.',
+        emotion: 'calm',
+        gesture: 'sip_tea',
+        stageDirection: 'Chén trà đưa lên, mắt vẫn khoá vào cột giữa',
+        by: 'guest',
+      },
+    ],
+    khong_mu_phuong: [
+      {
+        line: 'Mất ba lớp rồi, {self} chẳng còn gì ngoài cột giữa trống trơn. {guest} dám nhìn thẳng không?',
+        emotion: 'fierce',
+        gesture: 'closeup_talk',
+        stageDirection: 'Ngẩng cao đầu, nhìn không chớp, tóc trần chỉ còn cài que',
+      },
+      {
+        line: '{motif} là nước {self} để dành tới tận bây giờ. Không mũ phượng thì vẫn hai mặt đối mặt, {name} ạ.',
+        emotion: 'calm',
+        gesture: 'tease',
+        stageDirection: 'Đẩy pháo vào giữa, động tác chậm mà chắc',
+      },
+      {
+        line: 'Ba lớp mất vì một cột trống: {motif} của {guest} gọn, và {self} nhớ nước này đến tận đêm sau {name} ạ.',
+        emotion: 'thinking',
+        gesture: 'closeup_talk',
+        stageDirection: 'Nhìn lên cột giữa một lúc lâu, rồi mới gấp quạt',
+        by: 'guest',
+      },
+    ],
+  },
+  ngo_tao_ma: {
+    do_dai: [
+      {
+        line: 'Ngựa vào ổ cỏ rồi đó {audience} — sát cung một ô thôi, mà đường lui của {guest} hẹp thấy rõ.',
+        emotion: 'check',
+        gesture: 'closeup_talk',
+        stageDirection: 'Chỉ mũi quạt vào ô ngựa nằm sát cung, gật gù',
+      },
+      {
+        line: '{motif} không ăn quân nào của {guest}: chỉ đứng đúng chỗ đó là ba cửa thoát khép lại.',
+        emotion: 'amused',
+        gesture: 'tease',
+        stageDirection: 'Kề quạt bên má, cười kiểu người ra đề đã có đáp án',
+      },
+      {
+        line: 'Xe pháo nhà {guest} muốn về đỡ cũng vướng chân nhau, {name} ạ. Đó là cái hay của con ngựa nằm ổ.',
+        emotion: 'thinking',
+        gesture: 'think_fan',
+        stageDirection: 'Gạt quạt ngang hai cột xe, mắt lần theo đường lùi',
+      },
+    ],
+    soc: [
+      {
+        line: 'Chết thật... {self} quên mất con ngựa nằm ổ. Một nước của {guest} mà ba cửa cung của {self} hẹp lại rồi {audience} ơi.',
+        emotion: 'surprised',
+        gesture: 'closeup_talk',
+        stageDirection: 'Ngả người ra sau, tay ôm chén trà chưa kịp uống',
+        by: 'guest',
+      },
+      {
+        line: '{motif} của {guest} đúng sách, mà sách thì {self} thuộc hơn {guest} đấy. Nhưng hôm nay {self} đang lơ đãng.',
+        emotion: 'fierce',
+        gesture: 'think_fan',
+        stageDirection: 'Gấp quạt rồi mở ra, mắt không rời cột chốt',
+        by: 'guest',
+      },
+      {
+        line: 'Ổ cỏ này {self} chiếm rồi: điểm nhảy lên bao nhiêu thì {guest} cũng phải nhìn con ngựa đó trước đã {name} ạ.',
+        emotion: 'check',
+        gesture: 'think_fan',
+        stageDirection: 'Quạt gõ hai nhịp lên ô ngựa, mắt không rời bàn',
+      },
+    ],
+    khong_mu_phuong: [
+      {
+        line: 'Mất hết hồi môn nên {self} chẳng nhịn nữa: ổ cỏ này {self} đóng chốt, {guest} liệu mà mở đường.',
+        emotion: 'check',
+        gesture: 'closeup_talk',
+        stageDirection: 'Đặt quân dứt khoát, tóc chỉ còn que cài, nhìn thẳng',
+      },
+      {
+        line: '{motif} mà {guest} học từ ai vậy? Không chê đâu nha, {self} chỉ tò mò vì nước này đẹp thật.',
+        emotion: 'amused',
+        gesture: 'tease',
+        stageDirection: 'Nghiêng đầu cười nửa miệng, quạt kề má chờ câu trả lời',
+        by: 'guest',
+      },
+      {
+        line: 'Không mũ phượng, {self} vẫn thích bài này nhất đêm nay. Đỡ được thì uống trà cùng {audience} nhé.',
+        emotion: 'fierce',
+        gesture: 'sip_tea',
+        stageDirection: 'Nâng chén về phía ống kính rồi mới nhìn bàn',
+      },
+    ],
+  },
+  thiet_mon_thuyen: {
+    do_dai: [
+      {
+        line: 'Pháo giữ cột giữa, then ngang trước cửa cung. {audience} coi, không có chìa khoá đâu {name} ạ.',
+        emotion: 'check',
+        gesture: 'closeup_talk',
+        stageDirection: 'Gõ sống quạt xuống ô giữa như đang đóng then cửa',
+      },
+      {
+        line: '{motif} là bài dạy người mới, nhưng người mới đỡ mãi vẫn chưa ra. {self} uống trà chờ.',
+        emotion: 'amused',
+        gesture: 'sip_tea',
+        stageDirection: 'Nhấp trà, vẻ mặt của người ra đề đã biết đáp án',
+      },
+      {
+        line: 'Cửa đóng then rồi {guest} ơi — quân nào của {guest} cũng phải đi đường vòng, còn {self} thì đi tắt.',
+        emotion: 'thinking',
+        gesture: 'think_fan',
+        stageDirection: 'Xoay quạt, chỉ lượt từng quân đang bị trói',
+      },
+    ],
+    soc: [
+      {
+        line: '{guest} dựng then cửa sắt thật... {self} đang loay hoay với hai quân bị trói chân đây {audience}.',
+        emotion: 'surprised',
+        gesture: 'think_fan',
+        stageDirection: 'Chống cằm, quạt mở nửa, mắt khoá cột giữa',
+        by: 'guest',
+      },
+      {
+        line: 'Cửa đóng rồi. {self} phải đổi một xe để chặt then: đắt, nhưng {self} chịu.',
+        emotion: 'fierce',
+        gesture: 'closeup_talk',
+        stageDirection: 'Đặt quân mạnh hơn thường lệ, môi mím chặt',
+        by: 'guest',
+      },
+      {
+        line: 'Then này {self} đóng, và {guest} phải phá bằng hai nước. Cột giữa thuộc về {self} rồi {audience} ạ.',
+        emotion: 'fierce',
+        gesture: 'closeup_talk',
+        stageDirection: 'Ghiền sống quạt xuống cột giữa, thế ngồi không đổi',
+      },
+    ],
+    khong_mu_phuong: [
+      {
+        line: 'Then cửa sắt với cô dâu không còn mũ phượng — {guest} cứ thử mở xem, {self} ngồi ngoài hiên chờ.',
+        emotion: 'fierce',
+        gesture: 'closeup_talk',
+        stageDirection: 'Tựa lưng vào cột chòi, thong dong không vội',
+      },
+      {
+        line: '{self} mất ba lớp cũng vì những nước như thế này, nên {motif} đêm nay không làm {self} run nữa {name} à.',
+        emotion: 'calm',
+        gesture: 'sip_tea',
+        stageDirection: 'Vuốt phẳng tay áo, ánh mắt bình thản lạ thường',
+        by: 'guest',
+      },
+      {
+        line: 'Cửa có then, nhưng {self} có thời gian. {audience} đếm giùm: {guest} cần mấy nước để phá?',
+        emotion: 'amused',
+        gesture: 'tease',
+        stageDirection: 'Xoè ngón tay đếm cùng khán giả, miệng cười',
+      },
+    ],
+  },
+  song_xa_thac: {
+    do_dai: [
+      {
+        line: 'Hai xe một trên một dưới — {motif} đó {audience}. {guest} chọn đường nào cũng là đường hẹp.',
+        emotion: 'check',
+        gesture: 'closeup_talk',
+        stageDirection: 'Lướt tay theo hai cột xe, trên rồi dưới',
+      },
+      {
+        line: 'Xe chồng chéo thế này thì {self} chỉ việc uống trà chờ {guest} chọn nhầm ô, {name} ạ.',
+        emotion: 'amused',
+        gesture: 'sip_tea',
+        stageDirection: 'Nghiêng chén trà, mắt liếc hai con xe',
+      },
+      {
+        line: 'Một xe dò đường, một xe đóng cửa. Bài này đọc sách một lần là nhớ, {audience} ơi.',
+        emotion: 'thinking',
+        gesture: 'think_fan',
+        stageDirection: 'Xoè hai ngón tay đếm từng con xe',
+      },
+    ],
+    soc: [
+      {
+        line: 'Hai xe của {guest} đi luân phiên thật... {self} đỡ được một nước, nước thứ hai thì {self} thú là khó.',
+        emotion: 'surprised',
+        gesture: 'think_fan',
+        stageDirection: 'Quạt mở rồi gấp, gấp rồi mở theo nhịp xe',
+        by: 'guest',
+      },
+      {
+        line: 'Đỡ mãi không hết, kiểu này dân cờ tường rất ghét. {self} đang ghét đây {audience} ạ.',
+        emotion: 'fierce',
+        gesture: 'closeup_talk',
+        stageDirection: 'Chật vật nhìn bàn, môi mím, tay chống cằm',
+        by: 'guest',
+      },
+      {
+        line: 'Xe trên dò đường, xe dưới đóng cửa — hai xe của {self} đi cùng nhịp rồi {guest} ạ, {audience} thấy điểm chưa?',
+        emotion: 'check',
+        gesture: 'closeup_talk',
+        stageDirection: 'Lướt tay hai lần theo hai cột xe, trên rồi dưới',
+      },
+    ],
+    khong_mu_phuong: [
+      {
+        line: '{guest} có hai xe, {self} còn mỗi cái đầu lạnh sau khi ba lớp hồi môn đã mất. Đánh tiếp đi {name}.',
+        emotion: 'fierce',
+        gesture: 'closeup_talk',
+        stageDirection: 'Ngồi thẳng, tóc chỉ còn que cài, nhìn không chớp',
+        by: 'guest',
+      },
+      {
+        line: '{motif} mà {self} còn đứng tới nước này thì {audience} nên thả tim cho cả hai bên rồi đó.',
+        emotion: 'amused',
+        gesture: 'tease',
+        stageDirection: 'Giơ chén trà về phía ống kính như cụng ly',
+        by: 'guest',
+      },
+      {
+        line: 'Không còn lớp nào để mất, {self} mới dám đẩy cả hai xe vào cửa hẹp. {guest} tính lại đi {name}.',
+        emotion: 'fierce',
+        gesture: 'closeup_talk',
+        stageDirection: 'Đặt hai con xe song song, ngón tay rời quân thật chậm',
+      },
+    ],
+  },
+  dai_dao_hoach_tam: {
+    do_dai: [
+      {
+        line: 'Xe đào thẳng vào tim cung — {motif} đó {audience}. Sĩ của {guest} đang phải nằm xuống.',
+        emotion: 'fierce',
+        gesture: 'closeup_talk',
+        stageDirection: 'Đẩy quân xe vào ô giữa, mắt sáng lên',
+      },
+      {
+        line: 'Can đảm mới đi được nước này: một xe chui giữa cung. Hời hay lỗ thì {self} chịu.',
+        emotion: 'amused',
+        gesture: 'think_fan',
+        stageDirection: 'Quạt che nửa mặt, chỉ lộ đôi mắt đang tính',
+      },
+      {
+        line: '{self} thích bài này vì nó đơn giản: cửa giữa mở thì tim lộ ra, {name} à.',
+        emotion: 'calm',
+        gesture: 'sip_tea',
+        stageDirection: 'Rót trà chậm, kiểu người đã nắm được thế',
+      },
+    ],
+    soc: [
+      {
+        line: '{guest} đào tim {self} thật rồi... mất sĩ giữa là mất luôn lớp che cuối cùng {audience} ơi.',
+        emotion: 'surprised',
+        gesture: 'closeup_talk',
+        stageDirection: 'Tay dừng giữa không trung, miệng hơi hé',
+        by: 'guest',
+      },
+      {
+        line: 'Nước này đau. Nhưng {self} không đổ cho ai: chính {self} để hở ô giữa.',
+        emotion: 'thinking',
+        gesture: 'think_fan',
+        stageDirection: 'Cúi nhìn bàn, ngón tay miết dọc sống quạt',
+        by: 'guest',
+      },
+      {
+        line: 'Sĩ của {guest} vừa nằm xuống, cột giữa mở toang — {self} đi trước một nhịp rồi {name} ạ.',
+        emotion: 'check',
+        gesture: 'think_fan',
+        stageDirection: 'Quạt mở rộng che nửa bàn, mắt ánh lên',
+      },
+    ],
+    khong_mu_phuong: [
+      {
+        line: 'Hồi môn mất hết rồi, tim cung còn mỗi một quân giữ. {guest} cứ việc {motif}, {self} không né.',
+        emotion: 'fierce',
+        gesture: 'closeup_talk',
+        stageDirection: 'Ngẩng cao đầu, để hở nguyên ô giữa trước mặt đối phương',
+        by: 'guest',
+      },
+      {
+        line: '{motif} mà {guest} đi được thì {self} phải ngồi lại mà xem. {audience} nhớ cổ vũ nước đỡ nhé.',
+        emotion: 'amused',
+        gesture: 'tease',
+        stageDirection: 'Cười thật, khoanh tay trước ngực chờ nước kế',
+        by: 'guest',
+      },
+      {
+        line: 'Tim cung của {guest} trống một ô, và {self} không cần mũ phượng mới dám đi vào đó {audience} ạ.',
+        emotion: 'fierce',
+        gesture: 'closeup_talk',
+        stageDirection: 'Đẩy xe vào ô giữa, vai thẳng, không né mắt',
+      },
+    ],
+  },
+};
+
+/** The patterns with their own voice. The show and its tests both read this instead of guessing. */
+export const BANKED_KILL_PATTERNS = Object.keys(KILL_PATTERN_BANK) as KillPatternId[];
+
+export function killPatternPool(
+  patternId: KillPatternId | null | undefined,
+  tier: CommentaryTier | null,
+  holder?: PatternHolder,
+): BankEntry[] {
+  if (!patternId || !tier) return [];
+  const pool = KILL_PATTERN_BANK[patternId]?.[tier] ?? [];
+  return holder ? pool.filter((entry) => (entry.by ?? 'self') === holder) : pool;
+}
+
+/**
+ * Every pool that holds broadcast copy, tiered events and named patterns together. The wording and
+ * quota invariants walk this, so a bank cannot dodge a check just by not being `TIERED_BANK`.
+ */
+export function bankedPools(): Array<{ id: string; tier: CommentaryTier; entries: BankEntry[] }> {
+  const out: Array<{ id: string; tier: CommentaryTier; entries: BankEntry[] }> = [];
+  for (const event of Object.keys(TIERED_BANK) as TacticalEventType[]) {
+    for (const tier of COMMENTARY_TIERS) {
+      out.push({ id: event, tier, entries: tierPool(event, tier) });
+    }
+  }
+  for (const patternId of BANKED_KILL_PATTERNS) {
+    for (const tier of COMMENTARY_TIERS) {
+      out.push({ id: patternId, tier, entries: killPatternPool(patternId, tier) });
+    }
+  }
+  return out;
 }

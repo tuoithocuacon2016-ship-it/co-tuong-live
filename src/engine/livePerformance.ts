@@ -13,7 +13,10 @@ import { GuestGender } from '../data/characters';
 import { DeepAnalysisResult } from './ai';
 import { BoardState, Move, PIECE_NAME_VI, PieceType } from './xiangqi';
 import { HostEmotion } from '../scene/portraitKinematics';
-import { BankEntry, commentaryTier, tierPool } from './commentaryBank';
+import { BankEntry, commentaryTier, killPatternPool, tierPool } from './commentaryBank';
+import type { PatternHolder } from './commentaryBank';
+import type { KillPatternId } from './patterns';
+import { patternNameVi } from './patterns';
 import { NightTheme, nightTeaseTokens } from './nightThemes';
 
 export type MatchPhase = 'khai_cuoc' | 'trung_cuoc' | 'tan_cuoc' | 'hoi_ket';
@@ -321,6 +324,8 @@ export function buildMovePerformanceScript(params: {
   recentLines?: string[];
   /** Dowry layers the challenger has already taken - drives the delivery tier, not the ruling. */
   ladderStep?: number;
+  /** The sát pháp the banner just named for this ply, if the ply earned a name. */
+  killPatternId?: KillPatternId | null;
 }): PerformanceScript {
   const {
     boardAfter,
@@ -334,6 +339,7 @@ export function buildMovePerformanceScript(params: {
     prevWinProbRed,
     recentLines = [],
     ladderStep = 0,
+    killPatternId = null,
   } = params;
 
   const phase = detectMatchPhase(boardAfter);
@@ -788,13 +794,25 @@ export function buildMovePerformanceScript(params: {
     motif: spokenMotif,
   };
   const tierLines = tierPool(tacticalEvent, tier).map((entry) => renderBankEntry(entry, ctx));
-  // A tier only wins while it still has something new to say; once its three deliveries are all
-  // in the recent window the base pool takes over again instead of repeating the same taunt.
+  // The pattern bank quotes a sát pháp by name and takes sides while it does: every line is either
+  // her own shape on the board or her conceding one the challenger just landed. So the banner has to
+  // be showing exactly the name the line speaks, and the line has to match who owns the shape.
+  const quotedPattern =
+    killPatternId && patternNameVi(killPatternId) === playedMotif ? killPatternId : null;
+  const holder: PatternHolder = move.piece.side === 'black' ? 'self' : 'guest';
+  const patternLines = killPatternPool(quotedPattern, tier, holder).map((entry) =>
+    renderBankEntry(entry, ctx),
+  );
+  // Named pattern first, then the tier, then the base pool: three deliveries per pool run out fast
+  // in a live room, and a repeated taunt is worse than a plain one.
+  const freshPattern = patternLines.filter((entry) => !recentLines.includes(entry.line));
   const freshTier = tierLines.filter((entry) => !recentLines.includes(entry.line));
   const chosen =
-    freshTier.length > 0
-      ? freshTier[Math.abs(seed) % freshTier.length]
-      : pickFresh(pool, recentLines, seed);
+    freshPattern.length > 0
+      ? freshPattern[Math.abs(seed) % freshPattern.length]
+      : freshTier.length > 0
+        ? freshTier[Math.abs(seed) % freshTier.length]
+        : pickFresh(pool, recentLines, seed);
 
   return {
     line: chosen.line,
