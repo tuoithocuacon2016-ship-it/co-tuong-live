@@ -378,7 +378,7 @@ export function buildMovePerformanceScript(params: {
     ? 'ôm gối ra hành lang ngắm trăng'
     : 'nhận phạt uống liền ba chén trà sen';
   const stakeReward = isBridal
-    ? 'tâm phục khẩu phục, nhường chàng một lớp hồi môn'
+    ? `tâm phục khẩu phục, nhường ${p.guest} một lớp hồi môn`
     : `tâm phục khẩu phục, kính ${p.guest} một chén trà thơm`;
 
   const seed =
@@ -943,7 +943,7 @@ export function buildRepetitionWarningScript(params: {
     offender === 'red'
       ? [
           {
-            line: `Này ${p.guest}... ${p.self} để ý nãy giờ chàng chiếu đúng hai vòng lặp rồi đấy. Vòng thứ ba là phạm luật Trường Chiếu — thua luôn nha! Đổi nước khác đi, ${p.audience} đang xem bản lĩnh chứ đâu xem nước lặp~`,
+            line: `Này ${p.guest}... ${p.self} để ý nãy giờ ${p.guest} chiếu đúng hai vòng lặp rồi đấy. Vòng thứ ba là phạm luật Trường Chiếu — thua luôn nha! Đổi nước khác đi, ${p.audience} đang xem bản lĩnh chứ đâu xem nước lặp~`,
             emotion: 'thinking',
             gesture: 'think_fan',
             stageDirection: 'Quạt dừng giữa không trung, ánh mắt nhắc nhở nhẹ nhàng',
@@ -959,14 +959,14 @@ export function buildRepetitionWarningScript(params: {
         ]
       : [
           {
-            line: `Ôi... ${p.self} mải chiếu thành ra lặp thế mất rồi! Ba vòng là bên chiếu bị xử thua, vậy nên nước này thiếp đổi hướng hẳn — chàng coi nhé~`,
+            line: `Ôi... ${p.self} mải chiếu thành ra lặp thế mất rồi! Ba vòng là bên chiếu bị xử thua, vậy nên nước này ${p.self} đổi hướng hẳn — ${p.guest} coi nhé~`,
             emotion: 'surprised',
             gesture: 'closeup_talk',
             stageDirection: 'Mỉm cười tự nhận, chủ động rời khỏi thế chiếu cũ',
             motif: 'Tự Đổi Nước',
           },
           {
-            line: `${p.audience} thấy rồi nha, ${p.self} vừa đi lại nước chiếu cũ hai vòng. Luật Trường Chiếu bắt bên chiếu phải đổi — nên nước tới thiếp đánh đường khác, khỏi ai trách ${p.self} được!`,
+            line: `${p.audience} thấy rồi nha, ${p.self} vừa đi lại nước chiếu cũ hai vòng. Luật Trường Chiếu bắt bên chiếu phải đổi — nên nước tới ${p.self} đánh đường khác, khỏi ai trách ${p.self} được!`,
             emotion: 'amused',
             gesture: 'sip_tea',
             stageDirection: 'Nhấp trà thong dong, công nhận luật trước phòng live',
