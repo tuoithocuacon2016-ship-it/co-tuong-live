@@ -88,7 +88,7 @@ import {
   tallyCrowdVotes,
   triageLiveComment,
 } from './engine/liveInteraction';
-import { actorIdFor } from './engine/liveIdentity';
+import { UNATTRIBUTED_ACTOR_ID, actorIdFor, reserveActorId } from './engine/liveIdentity';
 import { CameraPreset, XiangqiStage, ZoomFocus } from './scene/XiangqiStage';
 import {
   DEFAULT_PIECE_STYLE,
@@ -168,6 +168,11 @@ const INITIAL_QUEUE: ChallengerEntry[] = [
   createChallenger('@LaoGiaCoTuong', actorIdFor('local', '@LaoGiaCoTuong'), 'nam', 64),
   createChallenger('@MinhNguyet_88', actorIdFor('local', '@MinhNguyet_88'), 'nu', 34),
 ];
+
+// The demo audience is simulated, but it is simulated as a *viewer*: the fake relay mints ids the
+// same way the real ingest server does, so a scripted fan who happens to type the seated player's
+// handle gets their own id instead of the operator's `local:` privileges.
+const simulatedAudienceActors = new Map<string, string>();
 
 export default function App() {
   const canvasMountRef = useRef<HTMLDivElement | null>(null);
@@ -594,6 +599,15 @@ export default function App() {
         });
         const data = await res.json();
         if (!res.ok) {
+          // A 429 means the show keeps running on the scripted bank instead of Gemini. That is the
+          // right failure, but it is invisible on air, so say where the voice came from.
+          if (data?.code === 'RATE_LIMITED') {
+            console.warn(
+              `[commentary] hết lượt gọi Gemini (${Math.ceil(
+                Number(data?.retryAfterMs ?? 0) / 1000,
+              )}s), chuyển sang lời bình sẵn có.`,
+            );
+          }
           if (params.explicitRequest) {
             setAiError(data?.error || 'Không thể kết nối bình luận viên AI.');
           }
@@ -1239,9 +1253,12 @@ export default function App() {
       },
     ) => {
       const currentChallenger = activeChallengerRef.current;
-      // Unforgeable identity check: remote relay events carry server-minted `actor:...` IDs,
-      // while local Studio panel / voice inputs mint `local:...` IDs.
-      const senderActorId = meta?.actorId ?? actorIdFor('local', username);
+      // Identity is only ever what the receiver minted, never something read back off the message:
+      // relay events carry server-minted `actor:...` ids, and just the Studio panel mints
+      // `local:...` for the operator's own machine. A message with no attribution is a stranger,
+      // not the handle it typed - falling back to a name-derived id is how a lookalike inherits
+      // the seated player's seat.
+      const senderActorId = meta?.actorId ?? UNATTRIBUTED_ACTOR_ID;
       const isChallenger = senderActorId === currentChallenger.actorId;
 
       // 0. Live TikTok Gift Reaction -> Immediate joyful thank-you + VIP Fast-Track Queue Upgrade!
@@ -1728,6 +1745,15 @@ export default function App() {
   }, []);
 
   // Subscribe to real-time SSE TikTok Live Stream from Express backend
+  // The Studio panel is the operator's own keyboard, so it is the one place that may mint a
+  // `local:` id - and it says so out loud instead of relying on a default a remote path could
+  // inherit.
+  const submitStudioChat = useCallback(
+    (username: string, text: string) =>
+      processIncomingChat(username, text, { actorId: actorIdFor('local', username) }),
+    [processIncomingChat],
+  );
+
   const processIncomingChatRef = useRef(processIncomingChat);
   useEffect(() => {
     processIncomingChatRef.current = processIncomingChat;
@@ -1743,7 +1769,7 @@ export default function App() {
             actorId:
               typeof data.actorId === 'string' && data.actorId.length > 0
                 ? data.actorId
-                : actorIdFor('relay', String(data.username)),
+                : UNATTRIBUTED_ACTOR_ID,
             gender: data.gender,
             age: data.age,
             giftName: data.giftName,
@@ -2100,6 +2126,7 @@ export default function App() {
       const line = fan.lines[Math.floor(Math.random() * fan.lines.length)];
       idx++;
       processIncomingChatRef.current(fan.username, line, {
+        actorId: reserveActorId(fan.username, simulatedAudienceActors, 'relay'),
         gender: fan.gender,
         age: fan.age,
       });
@@ -2578,7 +2605,7 @@ export default function App() {
           onConfirmPendingVoiceMove={handleConfirmPendingVoiceMove}
           onCancelPendingVoiceMove={handleCancelPendingVoiceMove}
           awaitingReadyCheck={awaitingReadyCheck}
-          onSubmitChat={(username, text) => processIncomingChat(username, text)}
+          onSubmitChat={submitStudioChat}
           onApplyGuestQuickMatch={handleApplyGuestQuickMatch}
           onPickFromQueue={handlePickFromQueue}
           onResetMatch={handleResetMatch}
@@ -2693,7 +2720,7 @@ export default function App() {
             onCancelPendingVoiceMove={handleCancelPendingVoiceMove}
             onReadSpotlightComment={handleReadSpotlightComment}
             hasSpotlightComment={spotlightComment !== null}
-            onSubmitChat={(username, text) => processIncomingChat(username, text)}
+            onSubmitChat={submitStudioChat}
             moveHintError={moveHintError}
             queue={queue}
             awaitingReadyCheck={awaitingReadyCheck}

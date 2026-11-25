@@ -17,6 +17,7 @@ import {
   resolveIngestToken,
   sanitizeHandle,
 } from './src/engine/liveIdentity';
+import { ENDPOINT_BUDGETS, callerKey, createBudgetLedger } from './src/server/requestBudget';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -145,6 +146,39 @@ function requireIngestAuth(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
+// --- Cost gate for the endpoints that bill Gemini per call ---
+// The browser calls these, so anyone who can load the public page can call them. Before this,
+// the only thing between a stranger with a for-loop and the month's quota was a JSON parse error.
+// In-memory and per-process on purpose: a show runs one server, and losing a few tokens when it
+// restarts beats dragging a store into broadcast time. This is a cost ceiling, not identity - the
+// ingest secret above is what decides who may speak.
+const budgets = createBudgetLedger(ENDPOINT_BUDGETS);
+
+// Behind a reverse proxy `req.ip` is the proxy, so one shared bucket would punish the whole
+// audience for the loudest scanner. `X-Forwarded-For` is caller-supplied, so it is only read when
+// the operator declares that a proxy really is in front: CTL_TRUST_PROXY=1.
+const trustProxyForBudget = /^(1|true|yes)$/i.test(process.env.CTL_TRUST_PROXY ?? '');
+
+/** Charges one token and answers 429 when the caller is out of budget. */
+function chargeBudget(endpoint: string, req: Request, res: Response): boolean {
+  const decision = budgets.check(endpoint, callerKey(req, trustProxyForBudget), Date.now());
+  if (decision.allowed) {
+    return true;
+  }
+  res.setHeader('Retry-After', String(Math.max(1, Math.ceil(decision.retryAfterMs / 1000))));
+  res.status(429).json({
+    error: 'Thiết bị này đã hết lượt gọi trí tuệ nhân tạo. Hãy chờ rồi thử lại.',
+    code: 'RATE_LIMITED',
+    retryAfterMs: decision.retryAfterMs,
+  });
+  return false;
+}
+
+// A caller who has refilled to the top no longer needs a bucket; drop them so a six-hour show
+// cannot grow this map one entry per visitor.
+const budgetPruneTimer = setInterval(() => budgets.prune(Date.now()), 5 * 60_000);
+budgetPruneTimer.unref();
+
 app.post('/api/live/chat', requireIngestAuth, (req: Request, res: Response) => {
   const body = req.body ?? {};
   const username = displayHandle(sanitizeHandle(body.username, 'Khách TikTok'));
@@ -271,6 +305,9 @@ app.post('/api/commentary', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'Thiếu dữ liệu nước đi để bình luận.' });
     return;
   }
+
+  // Past the free exits (no key, no move data): from here the call is billed, so it is metered.
+  if (!chargeBudget('commentary', req, res)) return;
 
   try {
     const cleanGuest = String(challengerName ?? actorName ?? 'khách mời').replace(/^@/, '');
@@ -492,6 +529,8 @@ app.post('/api/parse-move', async (req: Request, res: Response) => {
     return;
   }
 
+  if (!chargeBudget('parseMove', req, res)) return;
+
   const compactList = legalMoves
     .slice(0, 90)
     .map(
@@ -595,6 +634,8 @@ app.post('/api/live-reply', async (req: Request, res: Response) => {
     res.status(400).json({ ok: false, error: 'Thiếu nội dung tin nhắn.' });
     return;
   }
+
+  if (!chargeBudget('liveReply', req, res)) return;
 
   const scenario =
     kind === 'backseat_coach'
@@ -752,6 +793,10 @@ app.post('/api/tts', async (req: Request, res: Response) => {
     return;
   }
 
+  // A cached line costs nothing, so it is charged nothing either: repeats during a show - the
+  // same tease landing twice - stay free, and only fresh synthesis spends the budget.
+  if (!chargeBudget('tts', req, res)) return;
+
   // Official Gemini 3.8 TTS expressive speechMetadata.style + single consistent prebuiltVoiceConfig
   const ttsModels = ['gemini-3.8-flash-tts', 'gemini-3.8-flash-lite-tts'];
   const errNotes: string[] = [];
@@ -852,6 +897,15 @@ async function startServer() {
       ingestToken()
         ? '[live] ingest ready: relay POSTs need the x-ctl-ingest-token header.'
         : '[live] CTL_LIVE_INGEST_TOKEN unset - relay POSTs get 503, so no anonymous writes reach the board.',
+    );
+    console.log(
+      '[cost] billed endpoints limited per device:',
+      Object.entries(ENDPOINT_BUDGETS)
+        .map(([name, spec]) => `${name} ${spec.refillPerMinute}/min (burst ${spec.capacity})`)
+        .join(', '),
+      trustProxyForBudget
+        ? '- caller read from X-Forwarded-For.'
+        : '- caller read from the socket address; behind a reverse proxy set CTL_TRUST_PROXY=1 or every viewer shares one bucket.',
     );
   });
 }
