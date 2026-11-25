@@ -874,6 +874,28 @@ export function buildNightTeaseScript(params: NightCopyContext & {
   };
 }
 
+export interface LiveEntryPlan {
+  appState: 'playing' | 'gameover';
+  opening: PerformanceScript | null;
+  speakConcessionClaim: boolean;
+}
+
+export function buildLiveEntryPlan(params: NightCopyContext & {
+  night: NightTheme;
+  challengerName: string;
+  guestGender: GuestGender;
+  guestAge: number;
+  recentLines?: string[];
+  seed?: number;
+}): LiveEntryPlan {
+  const freshOpening = params.board.status === 'playing' && params.board.moveCount === 0;
+  return {
+    appState: params.board.status === 'playing' ? 'playing' : 'gameover',
+    opening: freshOpening ? buildNightTeaseScript(params) : null,
+    speakConcessionClaim: freshOpening,
+  };
+}
+
 /**
  * The referee's early nudge: fired on the SECOND trip through a checking cycle, while the game is
  * still playable and nobody has been ruled against yet. Deliberately soft — it teaches the
