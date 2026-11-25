@@ -68,6 +68,7 @@ import {
   ladderStep as countLadderStep,
   loadLadder,
   saveLadder,
+  shouldForfeitForPattern,
 } from './engine/bridalLadder';
 import {
   NightTheme,
@@ -902,7 +903,10 @@ export default function App() {
 
       // The dowry only moves when a checking pattern really lands on the bride, or when she
       // loses the game - it is a consequence on the board, never a scripted handicap.
-      if (killStrike && killStrike.forcing && side === 'red' && nextBoard.status === 'playing') {
+      if (
+        killStrike &&
+        shouldForfeitForPattern(killStrike.forcing, side, nextBoard.status)
+      ) {
         const forfeit = forfeitForPattern(dowryRef.current, killStrike.id);
         applyDowryForfeit(
           forfeit.ladder,

@@ -16,6 +16,7 @@ import {
   serializeLadder,
   forfeitForPattern,
   forfeitCandle,
+  shouldForfeitForPattern,
 } from './bridalLadder';
 
 function fakeStorage(initial: Record<string, string> = {}) {
@@ -45,6 +46,15 @@ test('The four documented strikes cost exactly the layer the plan names', () => 
   assert.equal(forfeitForPattern(start, 'ngo_tao_ma').lost?.id, 'mu_phuong');
   assert.equal(forfeitForPattern(start, 'thiet_mon_thuyen').lost?.id, 'hai_theu');
   assert.equal(forfeitForPattern(start, 'dai_dao_hoach_tam').lost?.id, 'ao_choang');
+});
+
+test('a checking pattern still costs its layer when it ends the game, but a draw does not', () => {
+  assert.equal(shouldForfeitForPattern(true, 'red', 'playing'), true);
+  assert.equal(shouldForfeitForPattern(true, 'red', 'red_win'), true);
+  assert.equal(shouldForfeitForPattern(true, 'red', 'draw'), false);
+  assert.equal(shouldForfeitForPattern(true, 'red', 'black_win'), false);
+  assert.equal(shouldForfeitForPattern(false, 'red', 'red_win'), false);
+  assert.equal(shouldForfeitForPattern(true, 'black', 'red_win'), false);
 });
 
 test('A strike already cashed in takes the next dearer layer instead of nothing', () => {
