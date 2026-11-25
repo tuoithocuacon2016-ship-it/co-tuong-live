@@ -28,6 +28,22 @@ export default defineConfig(() => {
         },
       },
     ],
+    build: {
+      rolldownOptions: {
+        output: {
+          codeSplitting: {
+            groups: [
+              {name: 'three', test: /node_modules[\\/]three[\\/]/, priority: 4, maxSize: 500 * 1024},
+              {
+                name: 'react',
+                test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/,
+                priority: 3,
+              },
+            ],
+          },
+        },
+      },
+    },
     resolve: {
       alias: {
         '@': path.resolve(import.meta.dirname, '.'),
