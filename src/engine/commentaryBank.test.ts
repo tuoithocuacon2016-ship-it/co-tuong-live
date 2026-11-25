@@ -24,7 +24,8 @@ import {
   TacticalEventType,
 } from './livePerformance';
 import { analyzePosition } from './ai';
-import { createInitialBoard, generateLegalMoves, makeMove } from './xiangqi';
+import { buildMoveCommentaryDelivery } from './matchmaker';
+import { createEmptyGrid, createInitialBoard, generateLegalMoves, makeMove } from './xiangqi';
 
 const SRC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -336,6 +337,65 @@ test('quiet plies only move the banner, loud plies get her voice', () => {
     }),
     true,
   );
+});
+
+test('a Red move always gets a banner, but only a crowd beat gets her voice', () => {
+  const { boardAfter: quietAfter, move: quietMove } = openingPosition();
+  const quiet = buildMoveCommentaryDelivery({
+    boardAfter: quietAfter,
+    move: quietMove,
+    notation: 'P2 bình 5',
+    actorName: '@KiemKhach_VN',
+    playedMotif: 'Pháo Đầu',
+    analysis: analyzePosition(quietAfter, 'nhap_mon'),
+    challengerName: '@KiemKhach_VN',
+    guestGender: 'nam',
+    guestAge: 26,
+    scoreDeltaForRed: 0,
+    recentLines: [],
+    previousPhase: 'khai_cuoc',
+    forcingPattern: false,
+  });
+  assert.ok(quiet.commentary.line.length > 30, 'even a quiet Red ply refreshes the banner');
+  assert.equal(quiet.commentary.moveNumber, 1);
+  assert.equal(quiet.tacticalEvent, 'opening_signature');
+  assert.equal(quiet.voiceReply, false);
+
+  const grid = createEmptyGrid();
+  grid[0][4] = { id: 'black_king', side: 'black', type: 'king' };
+  grid[9][3] = { id: 'red_king', side: 'red', type: 'king' };
+  grid[5][0] = { id: 'red_chariot', side: 'red', type: 'chariot' };
+  const before = {
+    grid,
+    turn: 'red' as const,
+    moveCount: 20,
+    lastMove: null,
+    status: 'playing' as const,
+    inCheck: null,
+  };
+  const checkingMove = generateLegalMoves(grid, 'red').find(
+    (move) => move.piece.id === 'red_chariot' && move.to.row === 0 && move.to.col === 0,
+  );
+  assert.ok(checkingMove);
+  const checkingAfter = makeMove(before, checkingMove!);
+  const loud = buildMoveCommentaryDelivery({
+    boardAfter: checkingAfter,
+    move: checkingMove!,
+    notation: 'Xe 1 tấn 1',
+    actorName: '@KiemKhach_VN',
+    playedMotif: '',
+    analysis: analyzePosition(checkingAfter, 'nhap_mon'),
+    challengerName: '@KiemKhach_VN',
+    guestGender: 'nam',
+    guestAge: 26,
+    scoreDeltaForRed: 0,
+    recentLines: [],
+    previousPhase: 'trung_cuoc',
+    forcingPattern: false,
+  });
+  assert.equal(loud.tacticalEvent, 'check_player');
+  assert.equal(loud.voiceReply, true, 'a Red check is a crowd beat even without a named pattern');
+  assert.ok(loud.commentary.line.length > 30);
 });
 
 test('a named sát pháp gets copy that takes sides, and never the wrong side', () => {
