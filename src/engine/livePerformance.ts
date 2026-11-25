@@ -685,6 +685,9 @@ export function buildMovePerformanceScript(params: {
       ];
       break;
 
+    // The three referee rulings are tiered in commentaryBank.ts now, so what follows is the
+    // fallback the room hears once those deliveries are spent. It keeps a job the bank cannot
+    // take: the event does not say which side broke the rule, so only here can the mover be named.
     case 'perpetual_check_ruling': {
       // The losing ply was just played, so the mover is the side the referee punished.
       const doomed = move.piece.side === 'black' ? p.self : p.guest;

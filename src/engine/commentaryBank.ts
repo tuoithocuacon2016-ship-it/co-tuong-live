@@ -1025,6 +1025,203 @@ export const TIERED_BANK: Partial<Record<TacticalEventType, Partial<Record<Comme
       },
     ],
   },
+  // The three referee rulings. The mover is never named here: the event does not say which side
+  // broke the rule, so the legacy pool in livePerformance.ts keeps the line that can say
+  // "bên chiếu là {self}", and these tier lines stay true whichever side the búa falls on.
+  perpetual_check_ruling: {
+    do_dai: [
+      {
+        line: 'Ba lần chiếu đúng một thế cũ là trường chiếu rồi đó {name} - bên chiếu phải đổi nước, không thì kỳ đài xử thua ngay tại bàn.',
+        emotion: 'check',
+        gesture: 'closeup_talk',
+        stageDirection: 'Gõ hai nhịp quạt xuống bàn theo từng vòng chiếu',
+        motif: 'Trường Chiếu Định Phận',
+      },
+      {
+        line: 'Chiếu hay mà chiếu lặp ba vòng thì hay thành phạm luật rồi. Đổi nước đi {audience} ơi, kỳ đài không chờ đâu!',
+        emotion: 'amused',
+        gesture: 'tease',
+        stageDirection: 'Xòe ba ngón tay đếm từng vòng lặp, mỉm cười',
+      },
+      {
+        line: 'Khai cuộc mà dọa nhau đúng một nước ba lần thì bên chiếu hết bài rồi {name} ạ. Không đổi là chịu luật.',
+        emotion: 'thinking',
+        gesture: 'think_fan',
+        stageDirection: 'Che nửa mặt sau quạt, mắt vẫn dõi theo vòng chiếu',
+      },
+    ],
+    soc: [
+      {
+        line: 'Nặng rồi: chiếu lại đúng thế cũ lần thứ ba. Kỳ đài không chờ nước thứ tư đâu {audience} ơi.',
+        emotion: 'surprised',
+        gesture: 'closeup_talk',
+        stageDirection: 'Nghiêng người về trước, giọng chùng xuống một nhịp',
+      },
+      {
+        line: '{capSelf} không cãi: ba vòng đúng một thế là đủ để xử rồi {audience} ạ. Nước sau mới là nước đáng xem.',
+        emotion: 'thinking',
+        gesture: 'think_fan',
+        stageDirection: 'Đặt quạt xuống bàn, mắt nhìn kỳ phổ thay vì ống quay',
+      },
+      {
+        line: 'Ba vòng, một thế, một phán quyết. {name} thấy rõ mà, không cần cãi thêm nước nào.',
+        emotion: 'calm',
+        gesture: 'groom_react',
+        stageDirection: 'Giơ tay ra hiệu khép nước, gật đầu với ống quay',
+      },
+    ],
+    khong_mu_phuong: [
+      {
+        line: 'Mất hết rồi thì càng phải đi đúng luật. Chiếu lặp ba vòng là xử, {audience} làm chứng giúp kỳ đài nhé.',
+        emotion: 'fierce',
+        gesture: 'closeup_talk',
+        stageDirection: 'Ngồi thẳng lưng, hai tay đặt lên bàn, nhìn thẳng ống quay',
+        motif: 'Trường Chiếu Định Phận',
+      },
+      {
+        line: '{capSelf} không cần ai nể mặt: chiếu lặp thì tự chịu, đổi nước đi thì bàn cờ lại mở.',
+        emotion: 'calm',
+        gesture: 'think_fan',
+        stageDirection: 'Gấp quạt dựng trước mặt, giọng đều như đọc điều luật',
+      },
+      {
+        line: 'Hồi môn không còn, luật vẫn còn một câu: bên chiếu lặp phải đổi. Đổi nước thì bàn cờ này còn sóng, {name} ạ.',
+        emotion: 'amused',
+        gesture: 'sip_tea',
+        stageDirection: 'Nhấp một ngụm trà, đặt chén xuống đúng nhịp gõ búa',
+      },
+    ],
+  },
+  repetition_draw: {
+    do_dai: [
+      {
+        line: 'Đúng một con đường ba lần thì kỳ đài xử hòa thôi {name} - hai bên đều thuộc bài nhau cả rồi.',
+        emotion: 'calm',
+        gesture: 'sip_tea',
+        stageDirection: 'Khoanh tay trước bàn cờ, mỉm cười nhận thế lặp',
+        motif: 'Lặp Thế Thu Cờ',
+      },
+      {
+        line: 'Hai bên cùng đi lại nước cũ lần thứ ba. Muốn thắng thì phải đổi hướng, cứ lặp vầy thì trăng tàn chưa dứt ván đâu.',
+        emotion: 'amused',
+        gesture: 'tease',
+        stageDirection: 'Đếm ba vòng bằng ngón tay, nhếch mép trêu',
+      },
+      {
+        line: 'Hòa vì lặp thế chứ không vì hết nước. {audience} thấy đó, chưa ai chịu mở trước.',
+        emotion: 'thinking',
+        gesture: 'think_fan',
+        stageDirection: 'Phe phẩy quạt, liếc sang bảng kỳ phổ treo sau lưng',
+      },
+    ],
+    soc: [
+      {
+        line: 'Lại đúng thế cũ lần thứ ba... {self} cũng không muốn thế này. Kỳ đài xử hòa, ván sau mình đánh khác nhé {name}.',
+        emotion: 'surprised',
+        gesture: 'closeup_talk',
+        stageDirection: 'Thở ra một nhịp ngắn, tay chạm quân cờ rồi rút về',
+      },
+      {
+        line: 'Ba vòng cùng một thế, không ai buông trước. Hòa là đúng luật, {audience} bớt ồn cho {self} nghe nước cuối.',
+        emotion: 'calm',
+        gesture: 'groom_react',
+        stageDirection: 'Gật đầu với ống quay, đưa tay mời phòng live im tiếng',
+      },
+      {
+        line: '{name} giữ kỳ phổ lại đi. Hòa hôm nay là vì {self} với {guest} đọc nhau quá kỹ, không phải vì hết nước.',
+        emotion: 'thinking',
+        gesture: 'think_fan',
+        stageDirection: 'Dựng quạt trước mặt, nhìn ô cuối của vòng lặp',
+        motif: 'Kỳ Phùng Địch Thủ',
+      },
+    ],
+    khong_mu_phuong: [
+      {
+        line: 'Hồi môn mất hết rồi, hòa thêm một ván nữa cũng chẳng đau. Luật lặp thế là luật chung, {name} ạ.',
+        emotion: 'fierce',
+        gesture: 'closeup_talk',
+        stageDirection: 'Ngồi thẳng, hai tay buông trên thành ghế, mắt không rời bàn',
+      },
+      {
+        line: '{capSelf} không xin hòa đâu. Kỳ đài xử vì thế lặp ba vòng, {audience} làm chứng là chẳng ai đổi nước.',
+        emotion: 'calm',
+        gesture: 'sip_tea',
+        stageDirection: 'Uống trà chậm, đặt chén xuống không một tiếng động',
+        motif: 'Lặp Thế Thu Cờ',
+      },
+      {
+        line: 'Còn ván sau: {self} sẽ đổi thế. {guest} có đổi không thì để {audience} đoán trước.',
+        emotion: 'amused',
+        gesture: 'tease',
+        stageDirection: 'Che nửa mặt sau quạt, liếc ống quay chờ phiếu đoán',
+      },
+    ],
+  },
+  sixty_move_draw: {
+    do_dai: [
+      {
+        line: 'Sáu mươi hiệp mà chưa rơi quân nào thì hòa theo luật, {name} à. Hai bên đều chắc tay, và đều chưa dám mở trước.',
+        emotion: 'calm',
+        gesture: 'sip_tea',
+        stageDirection: 'Xoay chén trà, gật đầu công nhận thế thủ',
+        motif: 'Sáu Mươi Hiệp',
+      },
+      {
+        line: '{capGuest} giữ kỹ thật: một trăm hai mươi nửa nước không mất quân nào. Hòa rồi, ván sau mạnh tay hơn đi {audience} ơi!',
+        emotion: 'amused',
+        gesture: 'tease',
+        stageDirection: 'Giơ hai ngón tay đếm hiệp, bật cười',
+      },
+      {
+        line: 'Hòa vì hết hiệp chứ không vì hết nước. {audience} thấy đó: một trăm hai mươi nửa nước mà chẳng ai mất thêm quân nào.',
+        emotion: 'thinking',
+        gesture: 'think_fan',
+        stageDirection: 'Quạt lướt trên mặt bàn cờ, chưa kịp chạm quân nào',
+      },
+    ],
+    soc: [
+      {
+        line: 'Một trăm hai mươi nửa nước bình chân như vại... {self} cũng bí. Hòa là xử đúng, không ai oan cả {audience} ạ.',
+        emotion: 'surprised',
+        gesture: 'closeup_talk',
+        stageDirection: 'Chống cằm nhìn bảng đếm hiệp, rồi ngẩng lên ống quay',
+        motif: 'Bình Chân Như Vại',
+      },
+      {
+        line: 'Sáu mươi hiệp không ai ăn quân nào. {audience} nể hay không thì kỳ đài vẫn chỉ có một câu: hòa.',
+        emotion: 'calm',
+        gesture: 'groom_react',
+        stageDirection: 'Đứng dậy khoanh tay chào một nhịp rồi ngồi xuống',
+      },
+      {
+        line: '{name} thủ chắc đến mức {self} chịu hết nước. Ván sau đừng thủ nữa, kỳ đài muốn sóng gió kia kìa.',
+        emotion: 'amused',
+        gesture: 'sip_tea',
+        stageDirection: 'Nhấp trà, mắt nể đối thủ qua bờ chén',
+      },
+    ],
+    khong_mu_phuong: [
+      {
+        line: 'Mất hồi môn rồi mà ván này vẫn chưa ai dứt điểm ai. Hòa theo luật sáu mươi hiệp, {audience} thấy công bằng không?',
+        emotion: 'fierce',
+        gesture: 'closeup_talk',
+        stageDirection: 'Tay đặt lên ô giữa bàn, giọng đều không gợn',
+      },
+      {
+        line: '{capSelf} không đổ cho luật. Sáu mươi hiệp không ăn quân thì xử hòa, và ván sau {self} đánh khác.',
+        emotion: 'calm',
+        gesture: 'think_fan',
+        stageDirection: 'Gấp quạt dựng trước mặt, chỉ ngẩng lên sau khi khép bàn cờ',
+        motif: 'Sáu Mươi Hiệp',
+      },
+      {
+        line: 'Hòa mà chẳng mất thêm quân nào, coi như hai bên cùng giữ được thể diện. {self} giữ đòn cho ván sau đó {name}!',
+        emotion: 'amused',
+        gesture: 'tease',
+        stageDirection: 'Khép bàn cờ, tay để hờ trên quân xe chưa đi',
+      },
+    ],
+  },
 };
 
 export function commentaryTier(params: {

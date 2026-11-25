@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { CommentaryTier, COMMENTARY_TOKENS, TIERED_BANK, commentaryTier, tierPool } from './commentaryBank';
 import {
   buildMovePerformanceScript,
+  resolvePronounProfile,
   shouldVoiceCommentary,
   TacticalEventType,
 } from './livePerformance';
@@ -43,15 +44,29 @@ test('commentaryTier escalates with the dowry ladder, otherwise reads the moment
     null,
   );
 
-  // The tier is a delivery choice only: an out-of-ladder position still gets a line,
-  // and an event nobody banked degrades to the legacy pool instead of throwing.
+  // The tier is a delivery choice only: an out-of-ladder position still gets a line, and with no
+  // tier to speak there is nothing to substitute, so the legacy pool answers instead of throwing.
   assert.equal(tierPool('check_bot', null).length, 0);
-  assert.equal(tierPool('sixty_move_draw', 'soc').length, 0);
+});
+
+test('every ruling the referee can hand down has a tiered delivery', () => {
+  // The three endings used to be legacy-only, so a draw sounded identical whether the dowry was
+  // intact or gone. The scan above only walks what is already in the bank; this is the half that
+  // notices when an event the engine can emit is missing from it.
+  for (const event of [
+    'perpetual_check_ruling',
+    'repetition_draw',
+    'sixty_move_draw',
+  ] as TacticalEventType[]) {
+    for (const tier of TIERS) {
+      assert.equal(tierPool(event, tier).length, 3, `${event}/${tier} is not banked`);
+    }
+  }
 });
 
 test('every banked tactical event carries three fresh lines per tier', () => {
   const events = Object.keys(TIERED_BANK) as TacticalEventType[];
-  assert.ok(events.length >= 16, `expected the hard beats banked, got ${events.length}`);
+  assert.ok(events.length >= 19, `every event the referee and the engine can name should be banked, got ${events.length}`);
 
   for (const event of events) {
     const seenPerEvent = new Set<string>();
@@ -188,6 +203,43 @@ test('the crown-gone tier takes over delivery once three dowry layers are lost',
     /hồi môn|mũ phượng/.test(stripped.line),
     `after three layers the defiance tier should name what is gone: ${stripped.line}`,
   );
+});
+
+test('a ruling the room has already heard names the side that broke the rule', () => {
+  // The banked ruling lines never say who was punished, because the event does not carry that.
+  // The legacy pool does, so once the tier's three deliveries are all in the room's ear the
+  // fallback must still be reachable - otherwise a repeated ruling is announced with no offender.
+  const { boardAfter } = openingPosition();
+  const punished = { ...boardAfter, statusReason: 'perpetual_check' as const };
+  const blackPly = generateLegalMoves(boardAfter.grid, 'black')[0];
+  assert.ok(blackPly, 'Black always has a reply in the opening');
+  const profile = resolvePronounProfile('nam', 26);
+  const base = {
+    boardAfter: punished,
+    move: blackPly,
+    playedMotif: 'Trường Chiếu',
+    analysis: analyzePosition(punished, 'nhap_mon'),
+    challengerName: '@KiemKhach_VN',
+    guestGender: 'nam' as const,
+    guestAge: 26,
+    scoreDeltaForRed: 0,
+    ladderStep: 3,
+  };
+
+  const heard: string[] = [];
+  for (let i = 0; i < 4; i++) {
+    heard.push(buildMovePerformanceScript({ ...base, recentLines: [...heard] }).line);
+  }
+  assert.equal(new Set(heard).size, 4, `a ruling repeated itself: ${heard.join(' | ')}`);
+
+  // Black made the punishing ply, so the fourth hearing - out of tier lines - is the legacy one,
+  // and it is the only delivery that can name the bride as the side the referee punished.
+  const fallback = heard[3];
+  assert.ok(fallback.includes(profile.self), `expected ${profile.self} to be named: ${fallback}`);
+  assert.ok(!fallback.includes(profile.guest), `the wrong side was named: ${fallback}`);
+  for (const line of heard.slice(0, 3)) {
+    assert.notEqual(line, fallback, 'the tier should be spent before the legacy line is used');
+  }
 });
 
 test('quiet plies only move the banner, loud plies get her voice', () => {
