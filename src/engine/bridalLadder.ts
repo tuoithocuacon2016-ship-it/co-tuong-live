@@ -1,4 +1,5 @@
 import type { KillPatternId } from './patterns';
+import type { BoardState, Side } from './xiangqi';
 
 /**
  * The dowry ladder: instead of dumbing the bride down, she wagers pieces of her hồi môn.
@@ -96,6 +97,14 @@ function forfeitRank(
     ladder: { held: ladder.held.filter((id) => id !== candidate.id) },
     lost: candidate,
   };
+}
+
+export function shouldForfeitForPattern(
+  forcing: boolean,
+  side: Side,
+  status: BoardState['status'],
+): boolean {
+  return forcing && side === 'red' && (status === 'playing' || status === 'red_win');
 }
 
 export function forfeitForPattern(
