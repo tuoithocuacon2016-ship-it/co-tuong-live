@@ -46,6 +46,7 @@ import {
   emotionToMood,
   pickNextChallenger,
 } from './engine/matchmaker';
+import { buildGeminiCommentaryItem } from './engine/geminiCommentary';
 import {
   MATCH_PHASE_LABELS_VI,
   PerformanceGesture,
@@ -320,6 +321,7 @@ export default function App() {
   const [actionCue, setActionCue] = useState<ActionCuePayload | null>(null);
   const focusSeqRef = useRef(0);
   const moveChoreoSeqRef = useRef(0);
+  const lastVerifiedMotifRef = useRef('');
   const actionCueSeqRef = useRef(0);
   const recentLinesRef = useRef<string[]>([]);
   const recentPosKeysRef = useRef<string[]>([]);
@@ -698,6 +700,7 @@ export default function App() {
       setSelectedSquare(null);
       setPreferredPieceId(null);
       setMoveHistory([]);
+      lastVerifiedMotifRef.current = '';
       stageRef.current?.syncBoard(setup.board, null, false);
       stageRef.current?.setSelectionOverlay(null, []);
       stageRef.current?.updateAnalysisVisuals(setup.board, freshAnalysis, showAnalysis, null);
@@ -715,6 +718,7 @@ export default function App() {
       side: 'red' | 'black';
       nextBoard: BoardState;
       move: Move;
+      verifiedMotif: string;
       nextAnalysis: DeepAnalysisResult;
       scoreDeltaForRed?: number;
       prevWinProbRed?: number;
@@ -752,7 +756,7 @@ export default function App() {
             guestGender: guest.gender,
             guestAge: guest.age,
             side: params.side,
-            motif: params.nextAnalysis.motif,
+            motif: params.verifiedMotif,
             phaseLabel,
             tacticalEvent,
             pieceCount,
@@ -790,39 +794,27 @@ export default function App() {
           }
           return null;
         }
-        if (data?.line) {
-          const emotion: HostEmotion = data.emotion || 'calm';
-          const gesture: PerformanceGesture = data.gesture || 'closeup_talk';
-          const stageDirection: string | undefined = data.stageDirection || undefined;
-          const item: CommentaryItem = {
-            id: `gem_${Date.now()}`,
-            moveNumber: params.nextBoard.moveCount,
-            actor: BOT_MASTER_PROFILE.name,
-            notation: params.notation,
-            motif: data.motif || params.nextAnalysis.motif,
-            line: data.line,
-            mood: emotionToMood(emotion),
+        const item = buildGeminiCommentaryItem(data, {
+          id: `gem_${Date.now()}`,
+          moveNumber: params.nextBoard.moveCount,
+          actor: BOT_MASTER_PROFILE.name,
+          notation: params.notation,
+          motif: params.verifiedMotif,
+          phaseLabel,
+        });
+        if (!item) return null;
+        if (params.explicitRequest) {
+          const emotion = item.emotion ?? 'calm';
+          recordRecentLine(item.line);
+          setCommentary(item);
+          setHostEmotion(emotion);
+          dispatchGestureCue(item.gesture ?? 'closeup_talk', item.stageDirection, 0);
+          triggerBotSpeaking(item.line, item.mood, {
             emotion,
-            emotionLabel: data.emotionLabel || EMOTION_LABELS_VI[emotion],
-            vocalCue: data.vocalCue || '',
-            gesture,
-            stageDirection,
-            phaseLabel: data.phaseLabel || phaseLabel,
-            source: 'gemini',
-          };
-          if (params.explicitRequest) {
-            recordRecentLine(item.line);
-            setCommentary(item);
-            setHostEmotion(emotion);
-            dispatchGestureCue(gesture, stageDirection, 0);
-            triggerBotSpeaking(item.line, item.mood, {
-              emotion,
-              vocalCue: item.vocalCue,
-            });
-          }
-          return item;
+            vocalCue: item.vocalCue,
+          });
         }
-        return null;
+        return item;
       } catch {
         if (params.explicitRequest) {
           setAiError('Mất kết nối tới máy chủ bình luận AI.');
@@ -887,6 +879,7 @@ export default function App() {
         nextBoard.grid,
         nightRef.current.focusPattern,
       );
+      lastVerifiedMotifRef.current = playedMotif;
       // The dowry follows the strongest pattern on the board, not the one tonight advertised: the
       // focus decides what the room is told, never what the bride pays.
       const killStrike = detectKillPattern(currentBoard.grid, nextBoard.grid, move);
@@ -1204,6 +1197,12 @@ export default function App() {
           if (plannedBotMove) {
             const botNotation = formatMoveVietnamese(nextBoard.grid, plannedBotMove);
             const simulatedAfterBot = makeMove(nextBoard, plannedBotMove);
+            const plannedMotif = detectMoveMotif(
+              nextBoard.grid,
+              plannedBotMove,
+              simulatedAfterBot.grid,
+              nightRef.current.focusPattern,
+            );
             boardAfterBotAnalysis = await xiangqiAiClient.analyzeAsync(
               simulatedAfterBot,
               difficultyRef.current,
@@ -1251,6 +1250,7 @@ export default function App() {
                 side: 'black',
                 nextBoard: simulatedAfterBot,
                 move: plannedBotMove,
+                verifiedMotif: plannedMotif,
                 nextAnalysis: boardAfterBotAnalysis,
                 scoreDeltaForRed,
                 prevWinProbRed,
@@ -2578,6 +2578,7 @@ export default function App() {
     boardRef.current = fresh;
     setAnalysis(freshAnalysis);
     setMoveHistory([]);
+    lastVerifiedMotifRef.current = '';
     setSelectedSquare(null);
     setPreferredPieceId(null);
     setBoardFocus(null);
@@ -2949,6 +2950,7 @@ export default function App() {
                 side: board.turn,
                 nextBoard: board,
                 move: analysis.bestMove,
+                verifiedMotif: '',
                 nextAnalysis: analysis,
                 explicitRequest: true,
               });
@@ -2962,6 +2964,7 @@ export default function App() {
                 side: board.lastMove.piece.side,
                 nextBoard: board,
                 move: board.lastMove,
+                verifiedMotif: lastVerifiedMotifRef.current,
                 nextAnalysis: analysis,
                 explicitRequest: true,
               });
@@ -3126,6 +3129,7 @@ export default function App() {
                   side: board.turn,
                   nextBoard: board,
                   move: analysis.bestMove,
+                  verifiedMotif: '',
                   nextAnalysis: analysis,
                   explicitRequest: true,
                 });
@@ -3139,6 +3143,7 @@ export default function App() {
                   side: board.lastMove.piece.side,
                   nextBoard: board,
                   move: board.lastMove,
+                  verifiedMotif: lastVerifiedMotifRef.current,
                   nextAnalysis: analysis,
                   explicitRequest: true,
                 });
