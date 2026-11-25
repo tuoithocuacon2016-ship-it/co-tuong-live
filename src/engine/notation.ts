@@ -300,12 +300,14 @@ export function parseVietnameseChatMove(
         };
       }
       if (matches.length > 1) {
-        matches.sort((a, b) =>
-          side === 'red' ? a.from.row - b.from.row : b.from.row - a.from.row,
-        );
         return {
-          move: matches[0],
-          notation: formatMoveVietnamese(state.grid, matches[0]),
+          move: null,
+          ambiguous: true,
+          candidates: matches.slice(0, 3),
+          error: `Nước đi "${rawInput.trim()}" có ${matches.length} cách đi (${matches
+            .slice(0, 2)
+            .map((m) => formatMoveVietnamese(state.grid, m))
+            .join(' hoặc ')}), nói rõ trước/sau giúp thiếp nhé!`,
         };
       }
       return {

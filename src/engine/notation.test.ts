@@ -75,6 +75,31 @@ test('parses x7 bình 3 and shorthand contextual moves (tiến 5, thoái 1)', ()
   assert.equal(thoai1.move!.to.row, 2);
 });
 
+test('full notation refuses to choose between two chariots on the same file', () => {
+  const grid = createEmptyGrid();
+  grid[0][3] = { id: 'bk', side: 'black', type: 'king' };
+  grid[9][4] = { id: 'rk', side: 'red', type: 'king' };
+  grid[8][2] = { id: 'red_chariot_front', side: 'red', type: 'chariot' };
+  grid[6][2] = { id: 'red_chariot_rear', side: 'red', type: 'chariot' };
+  const state = {
+    grid,
+    turn: 'red' as const,
+    moveCount: 4,
+    lastMove: null,
+    status: 'playing' as const,
+    inCheck: null,
+  };
+
+  const res = parseVietnameseChatMove(state, 'x7 tiến 1');
+  assert.equal(res.move, null);
+  assert.equal(res.ambiguous, true);
+  assert.deepEqual(
+    new Set(res.candidates?.map((move) => move.piece.id)),
+    new Set(['red_chariot_front', 'red_chariot_rear']),
+  );
+  assert.match(res.error ?? '', /2 cách đi/);
+});
+
 test('classifies TikTok chat intents (!choi, !nu 24, move candidates, normal chat)', () => {
   assert.equal(classifyChatMessage('!choi').type, 'challenge');
   assert.equal(classifyChatMessage('lên đài đấu với bot').type, 'challenge');
