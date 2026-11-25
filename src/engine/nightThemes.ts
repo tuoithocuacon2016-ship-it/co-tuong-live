@@ -10,8 +10,8 @@
 import type { ConcessionChoice } from './handicap';
 import type { KillPatternId } from './patterns';
 import { patternNameVi } from './patterns';
-import type { DowryLayerId } from './bridalLadder';
-import { layerById } from './bridalLadder';
+import type { BridalLadder, DowryLayerId } from './bridalLadder';
+import { isHeld, layerById } from './bridalLadder';
 import type { BoardState, Coord, PieceType, Side } from './xiangqi';
 import type { HostEmotion } from '../scene/portraitKinematics';
 import type { PerformanceGesture } from './livePerformance';
@@ -439,6 +439,22 @@ export function resolveNightTheme(date: Date, overrideIndex?: number): NightThem
       ? overrideIndex - 1
       : nightIndexFromDate(date),
   );
+}
+
+export interface NightDowryStatus {
+  layerNameVi: string;
+  held: boolean;
+  labelVi: string;
+}
+
+export function nightDowryStatus(theme: NightTheme, ladder: BridalLadder): NightDowryStatus {
+  const layer = layerById(theme.headlineLayer);
+  const held = isHeld(ladder, layer.id);
+  return {
+    layerNameVi: layer.nameVi,
+    held,
+    labelVi: held ? `Treo ${layer.nameVi}` : `Đã giao ${layer.nameVi}`,
+  };
 }
 
 const sameSquare = (a: Coord, b: Coord): boolean => a.row === b.row && a.col === b.col;

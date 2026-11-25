@@ -73,6 +73,7 @@ import {
 import {
   NightTheme,
   nightBookFavour,
+  nightDowryStatus,
   resolveNightTheme,
 } from './engine/nightThemes';
 import {
@@ -2717,6 +2718,7 @@ export default function App() {
           botThinking={botThinking}
           viewerCount={viewerCount}
           nightName={nightRef.current.nameVi}
+          nightDowryLabel={nightDowryStatus(nightRef.current, dowry).labelVi}
           analysis={analysis}
           commentary={commentary}
           messages={messages}
@@ -2874,6 +2876,7 @@ export default function App() {
             tiktokFrame={tiktokFrame}
             viewerCount={viewerCount}
             dowry={dowry}
+            night={nightRef.current}
             liveMode={liveMode}
             awaitingReadyCheck={awaitingReadyCheck}
             onToggleAnalysis={() => {
