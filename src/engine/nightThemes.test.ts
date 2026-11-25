@@ -299,6 +299,23 @@ test('night lines render through the same pronoun machinery as the bank', () => 
   }
 });
 
+test('every night can open the show in its own voice', () => {
+  for (const theme of NIGHT_THEMES) {
+    const opening = buildNightTeaseScript({
+      night: theme,
+      challengerName: '@KiemKhach_VN',
+      guestGender: 'nam',
+      guestAge: 26,
+      moveCount: 0,
+      recentLines: [],
+      seed: theme.index,
+    });
+    assert.equal(opening.phase, 'khai_cuoc', `${theme.nameVi} opened in the wrong phase`);
+    assert.equal(opening.motif, theme.nameVi, `${theme.nameVi} lost its chapter title`);
+    assert.ok(opening.line.length > 30, `${theme.nameVi} had no opening voice`);
+  }
+});
+
 test('the night that concedes gives away the horse her own line does not ride', () => {
   // Plan T5 puts 让単馬 on the evening whose hồi môn is the phoenix crown, and that is this night:
   // its signature is the ngọa tào horse. The rung has to be playable on its own script, so no Black

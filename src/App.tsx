@@ -2363,14 +2363,12 @@ export default function App() {
       wuxiaAudio.playGuzhengSweep();
 
       const guest = activeChallengerRef.current;
-      const opening = buildLiveSessionBeat({
-        beat: 'live_opening',
+      const opening = buildNightTeaseScript({
+        night: nightRef.current,
         challengerName: guest.username,
-        guestTitle: guest.character.title,
         guestGender: guest.gender,
         guestAge: guest.age,
-        winProbRed: analysisRef.current.winProbRed,
-        moveCount: boardRef.current.moveCount,
+        moveCount: 0,
         recentLines: recentLinesRef.current,
       });
       performScriptBeat(opening, { moveNumber: 0, notation: 'Khai Đài Live' });
@@ -2424,13 +2422,11 @@ export default function App() {
     stageRef.current?.setBotState('calm', false);
 
     const guest = activeChallengerRef.current;
-    const resetBeat = buildLiveSessionBeat({
-      beat: 'live_opening',
+    const resetBeat = buildNightTeaseScript({
+      night: nightRef.current,
       challengerName: guest.username,
-      guestTitle: guest.character.title,
       guestGender: guest.gender,
       guestAge: guest.age,
-      winProbRed: freshAnalysis.winProbRed,
       moveCount: 0,
       recentLines: [],
     });
