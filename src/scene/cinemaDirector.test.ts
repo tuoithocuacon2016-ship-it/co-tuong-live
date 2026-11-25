@@ -2,11 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { KillPatternId } from '../engine/patterns';
 import {
+  MOVE_LANDING_MS,
+  MOVE_PIECE_DURATION_S,
+  MOVE_SETTLE_MS,
   boardCoordToCinemaWorld,
   createInitialCinemaDirector,
   killPatternPresentation,
   resolveCinemaVisualPlate,
   resolveKillPatternAudioCue,
+  sampleBoardMoveTimeline,
   stepCinemaDirector,
 } from './cinemaDirector';
 
@@ -91,6 +95,83 @@ test('moveEvent choreographs articulated piece pickup, arc carry, and camera cut
     mid.bridePose.rightReachTargetX < fromX && mid.bridePose.rightReachTargetX > toX,
     'Hand should smoothly arc from source col 7 toward destination col 4',
   );
+});
+
+test('shared board timeline lands at 1.116s and settles at 1.55s without overshoot', () => {
+  assert.equal(MOVE_PIECE_DURATION_S, 1.55);
+  assert.equal(MOVE_LANDING_MS, 1116);
+  assert.equal(MOVE_SETTLE_MS, 1550);
+  assert.deepEqual(sampleBoardMoveTimeline(-1), {
+    phase: 'reach',
+    travel: 0,
+    lift: 0,
+    landed: false,
+  });
+  assert.deepEqual(sampleBoardMoveTimeline(0.434), {
+    phase: 'carry',
+    travel: 0,
+    lift: 0,
+    landed: false,
+  });
+  const carry = sampleBoardMoveTimeline(0.8);
+  assert.equal(carry.phase, 'carry');
+  assert.ok(carry.travel > 0 && carry.travel < 1);
+  assert.ok(carry.lift > 0);
+  assert.equal(carry.landed, false);
+  assert.deepEqual(sampleBoardMoveTimeline(1.116), {
+    phase: 'landed',
+    travel: 1,
+    lift: 0,
+    landed: true,
+  });
+  assert.deepEqual(sampleBoardMoveTimeline(1.3), {
+    phase: 'withdraw',
+    travel: 1,
+    lift: 0,
+    landed: true,
+  });
+  assert.deepEqual(sampleBoardMoveTimeline(99), {
+    phase: 'withdraw',
+    travel: 1,
+    lift: 0,
+    landed: true,
+  });
+});
+
+test('cinema pose keeps the piece placed through withdrawal and then returns to idle', () => {
+  const dir = createInitialCinemaDirector();
+  const moveEvent = {
+    side: 'black' as const,
+    from: { row: 2, col: 7 },
+    to: { row: 2, col: 4 },
+    captured: false,
+    inCheck: false,
+    pieceId: 'b_cannon_2',
+    seq: 1,
+  };
+  const input = {
+    requestedAngle: 'auto' as const,
+    emotion: 'calm' as const,
+    isSpeaking: false,
+    botThinking: false,
+    inCheck: false,
+    moveEvent,
+    actionCue: null,
+  };
+  let pose = stepCinemaDirector(dir, { ...input, dt: 0.05 });
+  for (let i = 0; i < 22; i++) {
+    pose = stepCinemaDirector(dir, { ...input, dt: 0.05 });
+  }
+  pose = stepCinemaDirector(dir, { ...input, dt: 0.016 });
+  assert.equal(pose.bridePose.action, 'move_piece');
+  assert.equal(pose.bridePose.pieceLiftedProgress, 1);
+  pose = stepCinemaDirector(dir, { ...input, dt: 0.05 });
+  assert.equal(pose.bridePose.action, 'move_piece');
+  assert.equal(pose.bridePose.pieceLiftedProgress, 1);
+  for (let i = 0; i < 8; i++) {
+    pose = stepCinemaDirector(dir, { ...input, dt: 0.05 });
+  }
+  assert.equal(pose.bridePose.action, 'idle');
 });
 
 test('sip_tea and tease action cues drive full teacup handoff and playful opponent reaction', () => {

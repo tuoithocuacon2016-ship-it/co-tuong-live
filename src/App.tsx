@@ -104,7 +104,12 @@ import {
   triageLiveComment,
 } from './engine/liveInteraction';
 import { UNATTRIBUTED_ACTOR_ID, actorIdFor, reserveActorId } from './engine/liveIdentity';
-import { CameraPreset, XiangqiStage, ZoomFocus } from './scene/XiangqiStage';
+import {
+  CameraPreset,
+  MoveLandingPayload,
+  XiangqiStage,
+  ZoomFocus,
+} from './scene/XiangqiStage';
 import {
   DEFAULT_PIECE_STYLE,
   PieceLabelMode,
@@ -330,6 +335,50 @@ export default function App() {
   const lastRepetitionSpokenAtRef = useRef<number>(0);
   const lastRepetitionWarnPlyRef = useRef<number>(-999);
   const voiceConfirmTimerRef = useRef<number | null>(null);
+  const landedMoveSeqRef = useRef(0);
+  const settledMoveSeqRef = useRef(0);
+  const pendingLandingCuesRef = useRef(new Map<number, Array<() => void>>());
+  const pendingSettledCuesRef = useRef(new Map<number, Array<() => void>>());
+
+  const queueMoveLandingCue = useCallback((seq: number, cue: () => void) => {
+    if (landedMoveSeqRef.current >= seq) {
+      cue();
+      return;
+    }
+    const cues = pendingLandingCuesRef.current.get(seq) ?? [];
+    cues.push(cue);
+    pendingLandingCuesRef.current.set(seq, cues);
+  }, []);
+
+  const queueMoveSettledCue = useCallback((seq: number, cue: () => void) => {
+    if (settledMoveSeqRef.current >= seq) {
+      cue();
+      return;
+    }
+    const cues = pendingSettledCuesRef.current.get(seq) ?? [];
+    cues.push(cue);
+    pendingSettledCuesRef.current.set(seq, cues);
+  }, []);
+
+  const flushMoveCues = useCallback(
+    (phase: 'landing' | 'settle', seq: number) => {
+      if (phase === 'landing') {
+        if (landedMoveSeqRef.current >= seq) return;
+        landedMoveSeqRef.current = seq;
+      } else {
+        if (settledMoveSeqRef.current >= seq) return;
+        settledMoveSeqRef.current = seq;
+      }
+      const queue =
+        phase === 'landing'
+          ? pendingLandingCuesRef.current
+          : pendingSettledCuesRef.current;
+      const cues = queue.get(seq) ?? [];
+      queue.delete(seq);
+      for (const cue of cues) cue();
+    },
+    [],
+  );
 
   // Refs synced to latest state so Three.js callbacks & SSE listeners never go stale
   const boardRef = useRef(board);
@@ -802,6 +851,9 @@ export default function App() {
         voiceReply?: boolean;
       },
     ) => {
+      if (appStateRef.current !== 'playing' || stageRef.current?.isMoveAnimating()) {
+        return;
+      }
       const currentBoard = boardRef.current;
       if (side === 'red') {
         const refusal = concessionBlock(currentBoard, concessionRef.current, move);
@@ -851,28 +903,52 @@ export default function App() {
           (hit) => hit && patternNameVi(hit.id) === playedMotif,
         ) ?? null;
 
-      // Crisp board audio FX scaled to move weight
+      const choreoSeq = ++moveChoreoSeqRef.current;
+      const animationStarted =
+        stageRef.current?.syncBoard(nextBoard, move, true, choreoSeq) ?? false;
+      stageRef.current?.setSelectionOverlay(null, []);
+      const isCurrentMove = () =>
+        appStateRef.current === 'playing' && boardRef.current === nextBoard;
+      const afterLanding = (cue: () => void) => {
+        const run = () => {
+          if (isCurrentMove()) cue();
+        };
+        if (animationStarted) {
+          queueMoveLandingCue(choreoSeq, run);
+        } else {
+          run();
+        }
+      };
+      const afterSettled = (cue: () => void) => {
+        const run = () => {
+          if (isCurrentMove()) cue();
+        };
+        if (animationStarted) {
+          queueMoveSettledCue(choreoSeq, run);
+        } else {
+          run();
+        }
+      };
+
       const patternAudio = namedPattern
         ? resolveKillPatternAudioCue(namedPattern.id, namedPattern.forcing)
         : null;
-      if (patternAudio === 'guzheng') {
-        wuxiaAudio.playGuzhengSweep();
-      } else if (patternAudio === 'capture') {
-        wuxiaAudio.playCapture();
-      } else if (patternAudio === 'check' || nextBoard.inCheck) {
-        wuxiaAudio.playCheck();
-      } else if (move.captured) {
-        wuxiaAudio.playCapture();
-      } else {
-        wuxiaAudio.playPieceMove();
-      }
+      afterLanding(() => {
+        if (patternAudio === 'guzheng') {
+          wuxiaAudio.playGuzhengSweep();
+        } else if (patternAudio === 'capture') {
+          wuxiaAudio.playCapture();
+        } else if (patternAudio === 'check' || nextBoard.inCheck) {
+          wuxiaAudio.playCheck();
+        } else if (move.captured) {
+          wuxiaAudio.playCapture();
+        } else {
+          wuxiaAudio.playPieceMove();
+        }
+      });
 
       const prevScore = prevScoreRef.current;
       const prevWinProbRed = prevWinProbRedRef.current;
-
-      // Update 3D stage IMMEDIATELY at 60fps before running any heavy AI search!
-      stageRef.current?.syncBoard(nextBoard, move, true);
-      stageRef.current?.setSelectionOverlay(null, []);
 
       // Direct Virtual Host eye-gaze & head turn smoothly toward exact landing square!
       setBoardFocus({
@@ -887,7 +963,7 @@ export default function App() {
 
       // Trigger Full-Body 3D Pavilion Arm Reach -> Lift Piece -> Carry -> Place Choreography!
       setMoveEvent({
-        seq: ++moveChoreoSeqRef.current,
+        seq: choreoSeq,
         side,
         from: move.from,
         to: move.to,
@@ -943,17 +1019,19 @@ export default function App() {
           ) {
             lastRepetitionSpokenAtRef.current = now;
             const guest = activeChallengerRef.current;
-            performScriptBeat(
-              buildRepetitionWarningScript({
-                offender,
-                challengerName: guest.username,
-                guestGender: guest.gender,
-                guestAge: guest.age,
-                moveCount: nextBoard.moveCount,
-                recentLines: recentLinesRef.current,
-              }),
-              { notation: 'Nhắc Luật Trường Chiếu' },
-            );
+            afterSettled(() => {
+              performScriptBeat(
+                buildRepetitionWarningScript({
+                  offender,
+                  challengerName: guest.username,
+                  guestGender: guest.gender,
+                  guestAge: guest.age,
+                  moveCount: nextBoard.moveCount,
+                  recentLines: recentLinesRef.current,
+                }),
+                { notation: 'Nhắc Luật Trường Chiếu' },
+              );
+            });
           }
         }
       }
@@ -997,17 +1075,19 @@ export default function App() {
           ladderStep: countLadderStep(dowryRef.current),
           killPatternId: namedPattern?.id ?? null,
         });
-        recordRecentLine(fallbackEnd.line);
-        setCommentary(fallbackEnd);
-        setHostEmotion(fallbackEnd.emotion ?? 'victory');
-        dispatchGestureCue(fallbackEnd.gesture, fallbackEnd.stageDirection, 900);
-        triggerBotSpeaking(fallbackEnd.line, fallbackEnd.mood, {
-          emotion: fallbackEnd.emotion,
-          vocalCue: fallbackEnd.vocalCue,
+        afterLanding(() => {
+          recordRecentLine(fallbackEnd.line);
+          setCommentary(fallbackEnd);
+          setHostEmotion(fallbackEnd.emotion ?? 'victory');
+          triggerBotSpeaking(fallbackEnd.line, fallbackEnd.mood, {
+            emotion: fallbackEnd.emotion,
+            vocalCue: fallbackEnd.vocalCue,
+          });
         });
-        setTimeout(() => {
+        afterSettled(() => {
+          dispatchGestureCue(fallbackEnd.gesture, fallbackEnd.stageDirection, 0);
           setAppState('gameover');
-        }, 700);
+        });
         return;
       }
 
@@ -1093,20 +1173,28 @@ export default function App() {
             forcingPattern: Boolean(killStrike?.forcing),
           });
           phaseRef.current = detectMatchPhase(nextBoard);
-          recordRecentLine(redDelivery.commentary.line);
-          setCommentary(redDelivery.commentary);
-          setHostEmotion(redDelivery.commentary.emotion ?? refinedReaction);
-          dispatchGestureCue(
-            redDelivery.commentary.gesture ?? 'closeup_talk',
-            redDelivery.commentary.stageDirection,
-            0,
-          );
-          if (redDelivery.voiceReply) {
-            triggerBotSpeaking(redDelivery.commentary.line, redDelivery.commentary.mood, {
-              emotion: redDelivery.commentary.emotion,
-              vocalCue: redDelivery.commentary.vocalCue,
-            });
-          }
+          afterLanding(() => {
+            recordRecentLine(redDelivery.commentary.line);
+            setCommentary(redDelivery.commentary);
+            setHostEmotion(redDelivery.commentary.emotion ?? refinedReaction);
+            if (redDelivery.voiceReply) {
+              triggerBotSpeaking(
+                redDelivery.commentary.line,
+                redDelivery.commentary.mood,
+                {
+                  emotion: redDelivery.commentary.emotion,
+                  vocalCue: redDelivery.commentary.vocalCue,
+                },
+              );
+            }
+          });
+          afterSettled(() => {
+            dispatchGestureCue(
+              redDelivery.commentary.gesture ?? 'closeup_talk',
+              redDelivery.commentary.stageDirection,
+              0,
+            );
+          });
 
           const plannedBotMove = botSearch.bestMove;
           let parallelGeminiPromise: Promise<CommentaryItem | null> | undefined;
@@ -1178,24 +1266,36 @@ export default function App() {
 
           const remainingThinkMs = Math.max(120, 760 - (Date.now() - thinkStartMs));
           botTimerRef.current = window.setTimeout(() => {
-            if (appStateRef.current !== 'playing' || turnSeqRef.current !== myTurnToken) {
+            const playBotMove = () => {
+              if (
+                appStateRef.current !== 'playing' ||
+                turnSeqRef.current !== myTurnToken
+              ) {
+                setBotThinking(false);
+                return;
+              }
+              const liveBoard = boardRef.current;
+              if (liveBoard.turn !== 'black' || liveBoard.status !== 'playing') {
+                setBotThinking(false);
+                return;
+              }
               setBotThinking(false);
-              return;
-            }
-            const liveBoard = boardRef.current;
-            if (liveBoard.turn !== 'black' || liveBoard.status !== 'playing') {
-              setBotThinking(false);
-              return;
-            }
-            setBotThinking(false);
-            if (plannedBotMove) {
-              commitMove(plannedBotMove, BOT_MASTER_PROFILE.name, 'black', {
-                nextAnalysis: boardAfterBotAnalysis,
-                geminiPromise: parallelGeminiPromise,
-                scoreDeltaForRed,
-                turnToken: myTurnToken,
-                voiceReply: voicePlannedReply,
+              if (plannedBotMove) {
+                commitMove(plannedBotMove, BOT_MASTER_PROFILE.name, 'black', {
+                  nextAnalysis: boardAfterBotAnalysis,
+                  geminiPromise: parallelGeminiPromise,
+                  scoreDeltaForRed,
+                  turnToken: myTurnToken,
+                  voiceReply: voicePlannedReply,
+                });
+              }
+            };
+            if (stageRef.current?.isMoveAnimating()) {
+              queueMoveSettledCue(choreoSeq, () => {
+                window.setTimeout(playBotMove, 0);
               });
+            } else {
+              playBotMove();
             }
           }, remainingThinkMs);
         })();
@@ -1263,21 +1363,31 @@ export default function App() {
 
       const expectedToken = precomputed?.turnToken ?? turnSeqRef.current;
       const deliverCommentary = (cmt: CommentaryItem) => {
-        if (turnSeqRef.current !== expectedToken) return;
+        if (
+          turnSeqRef.current !== expectedToken ||
+          appStateRef.current !== 'playing' ||
+          boardRef.current !== nextBoard
+        ) {
+          return;
+        }
         const emo = cmt.emotion ?? 'calm';
-        recordRecentLine(cmt.line);
-        setCommentary(cmt);
-        setHostEmotion(emo);
-        // Let the hand-lift shot (table_hands) land cleanly (~1.25s), then cut to the synced gesture!
-        dispatchGestureCue(
-          cmt.gesture ?? fallbackCmt.gesture,
-          cmt.stageDirection ?? fallbackCmt.stageDirection,
-          1250,
-        );
-        if (!voiceReply) return;
-        triggerBotSpeaking(cmt.line, cmt.mood, {
-          emotion: emo,
-          vocalCue: cmt.vocalCue,
+        afterLanding(() => {
+          recordRecentLine(cmt.line);
+          setCommentary(cmt);
+          setHostEmotion(emo);
+          if (voiceReply) {
+            triggerBotSpeaking(cmt.line, cmt.mood, {
+              emotion: emo,
+              vocalCue: cmt.vocalCue,
+            });
+          }
+        });
+        afterSettled(() => {
+          dispatchGestureCue(
+            cmt.gesture ?? fallbackCmt.gesture,
+            cmt.stageDirection ?? fallbackCmt.stageDirection,
+            0,
+          );
         });
       };
 
@@ -1298,6 +1408,8 @@ export default function App() {
       applyDowryForfeit,
       dispatchGestureCue,
       performScriptBeat,
+      queueMoveLandingCue,
+      queueMoveSettledCue,
       recordRecentLine,
       refuseConcessionMove,
       requestEmotionalGeminiCommentary,
@@ -1823,7 +1935,13 @@ export default function App() {
   // Board click interaction handler (convenience alongside chat commands)
   const handleSquareClick = useCallback(
     (row: number, col: number) => {
-      if (appStateRef.current !== 'playing' || botThinkingRef.current) return;
+      if (
+        appStateRef.current !== 'playing' ||
+        botThinkingRef.current ||
+        stageRef.current?.isMoveAnimating()
+      ) {
+        return;
+      }
       const current = boardRef.current;
       if (current.status !== 'playing' || current.turn !== 'red') return;
 
@@ -1881,6 +1999,17 @@ export default function App() {
     handleSquareClickRef.current = handleSquareClick;
   }, [handleSquareClick]);
 
+  const handleMoveLandedRef = useRef<(move: MoveLandingPayload) => void>(() => {});
+  const handleMoveSettledRef = useRef<(move: MoveLandingPayload) => void>(() => {});
+  handleMoveLandedRef.current = (move) => {
+    if (move.seq !== moveChoreoSeqRef.current) return;
+    flushMoveCues('landing', move.seq);
+  };
+  handleMoveSettledRef.current = (move) => {
+    if (move.seq !== moveChoreoSeqRef.current) return;
+    flushMoveCues('settle', move.seq);
+  };
+
   // Mount Three.js Stage ONCE in isolated container
   useEffect(() => {
     const mount = canvasMountRef.current;
@@ -1888,6 +2017,8 @@ export default function App() {
 
     const stage = new XiangqiStage(mount, boardRef.current, activeChallengerRef.current.character, {
       onSquareClick: (r, c) => handleSquareClickRef.current(r, c),
+      onMoveLanded: (move) => handleMoveLandedRef.current(move),
+      onMoveSettled: (move) => handleMoveSettledRef.current(move),
     });
     stageRef.current = stage;
 
@@ -1905,6 +2036,8 @@ export default function App() {
       if (botTimerRef.current) window.clearTimeout(botTimerRef.current);
       if (speakTimerRef.current) window.clearTimeout(speakTimerRef.current);
       if (gestureChoreoTimerRef.current) window.clearTimeout(gestureChoreoTimerRef.current);
+      pendingLandingCuesRef.current.clear();
+      pendingSettledCuesRef.current.clear();
       wuxiaAudio.stopSpeech();
       stage.dispose();
       stageRef.current = null;
@@ -2416,6 +2549,8 @@ export default function App() {
 
   const handleResetMatch = useCallback(() => {
     turnSeqRef.current++;
+    pendingLandingCuesRef.current.clear();
+    pendingSettledCuesRef.current.clear();
     if (botTimerRef.current) window.clearTimeout(botTimerRef.current);
     if (gestureChoreoTimerRef.current) {
       window.clearTimeout(gestureChoreoTimerRef.current);

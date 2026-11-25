@@ -34,6 +34,10 @@ import {
   updateCharacterAnimation,
 } from './characters3d';
 import { WuxiaEffectsController } from './wuxiaEffects';
+import {
+  MOVE_PIECE_DURATION_S,
+  sampleBoardMoveTimeline,
+} from './cinemaDirector';
 
 export type CameraPreset = 'liveBot' | 'duel' | 'board' | 'guest';
 export type ZoomFocus = 'bot' | 'guest';
@@ -49,12 +53,29 @@ interface PieceMoveAnim {
   pieceId: string;
   startPos: THREE.Vector3;
   endPos: THREE.Vector3;
-  elapsed: number;
-  duration: number;
+  startedAt: number;
+  landingNotified: boolean;
+  seq: number;
+  capturedIds: string[];
+  heavy: boolean;
+  trauma: number;
+  side: Side;
+  row: number;
+  col: number;
+}
+
+export interface MoveLandingPayload {
+  pieceId: string;
+  seq: number;
+  row: number;
+  col: number;
+  side: Side;
 }
 
 export interface StageCallbacks {
   onSquareClick?: (row: number, col: number) => void;
+  onMoveLanded?: (move: MoveLandingPayload) => void;
+  onMoveSettled?: (move: MoveLandingPayload) => void;
 }
 
 const BOARD_WORLD_W = 4.2;
@@ -799,45 +820,57 @@ export class XiangqiStage {
     board: BoardState,
     animatedMove: Move | null = null,
     triggerEffects = true,
-  ) {
+    moveSeq = 0,
+  ): boolean {
+    this.activeMoveAnim = null;
     const aliveIds = new Set<string>();
+    let animationStarted = false;
 
     for (let r = 0; r < BOARD_ROWS; r++) {
       for (let c = 0; c < BOARD_COLS; c++) {
         const piece = board.grid[r][c];
         if (!piece) continue;
         aliveIds.add(piece.id);
+        const isMovingPiece = animatedMove !== null && animatedMove.piece.id === piece.id;
 
         let visual = this.pieceVisuals.get(piece.id);
         if (!visual) {
           const group = this.createPieceMesh(piece);
-          group.position.copy(this.coordToWorld(r, c, 0));
+          const initialCoord =
+            animatedMove && isMovingPiece ? animatedMove.from : { row: r, col: c };
+          group.position.copy(this.coordToWorld(initialCoord.row, initialCoord.col, 0));
           this.piecesGroup.add(group);
           visual = { piece, group, row: r, col: c };
           this.pieceVisuals.set(piece.id, visual);
-        } else {
-          if (animatedMove && animatedMove.piece.id === piece.id) {
-            const startPos = this.coordToWorld(animatedMove.from.row, animatedMove.from.col, 0);
-            const endPos = this.coordToWorld(r, c, 0);
-            this.activeMoveAnim = {
-              pieceId: piece.id,
-              startPos,
-              endPos,
-              elapsed: 0,
-              duration: 0.34,
-            };
-          } else {
-            visual.group.position.copy(this.coordToWorld(r, c, 0));
-          }
-          visual.row = r;
-          visual.col = c;
         }
+
+        if (isMovingPiece) {
+          this.activeMoveAnim = {
+            pieceId: piece.id,
+            startPos: this.coordToWorld(animatedMove.from.row, animatedMove.from.col, 0),
+            endPos: this.coordToWorld(r, c, 0),
+            startedAt: 0,
+            landingNotified: false,
+            seq: moveSeq,
+            capturedIds: animatedMove.captured ? [animatedMove.captured.id] : [],
+            heavy: Boolean(animatedMove.captured) || board.inCheck !== null,
+            trauma: board.inCheck ? 0.55 : 0.35,
+            side: animatedMove.piece.side,
+            row: r,
+            col: c,
+          };
+          animationStarted = true;
+        } else {
+          visual.group.position.copy(this.coordToWorld(r, c, 0));
+        }
+        visual.row = r;
+        visual.col = c;
       }
     }
 
-    // Remove captured pieces cleanly
+    const retainedCaptures = new Set(this.activeMoveAnim?.capturedIds ?? []);
     for (const [id, vis] of this.pieceVisuals.entries()) {
-      if (!aliveIds.has(id)) {
+      if (!aliveIds.has(id) && !retainedCaptures.has(id)) {
         this.piecesGroup.remove(vis.group);
         const faceMat = vis.group.userData?.faceMat as THREE.Material | undefined;
         faceMat?.dispose();
@@ -845,25 +878,19 @@ export class XiangqiStage {
       }
     }
 
-    // Trigger character reach gesture, hitstop, camera shake & sword-qi spark burst
     if (animatedMove && triggerEffects) {
       if (animatedMove.piece.side === 'black') {
         this.botGestureProgress = 0;
       } else {
         this.guestGestureProgress = 0;
       }
-      const isHeavy = Boolean(animatedMove.captured) || board.inCheck !== null;
-      this.effects.triggerImpactBurst(
-        animatedMove.to.row,
-        animatedMove.to.col,
-        isHeavy,
-        animatedMove.piece.side,
-      );
-      if (isHeavy) {
-        this.hitstopTimer = 0.045;
-        this.trauma = Math.min(1, this.trauma + (board.inCheck ? 0.55 : 0.35));
-      }
     }
+    if (this.activeMoveAnim) this.activeMoveAnim.startedAt = performance.now();
+    return animationStarted;
+  }
+
+  public isMoveAnimating(): boolean {
+    return this.activeMoveAnim !== null;
   }
 
   public setSelectionOverlay(selected: Coord | null, legalTargets: Coord[]) {
@@ -1163,31 +1190,58 @@ export class XiangqiStage {
     }
     this.elapsed += simDt;
 
-    // 1. Parabolic lift-and-slam piece animation
+    // 1. Reach, carry, place, then withdraw on the same clock as the cinema director.
     if (this.activeMoveAnim) {
-      this.activeMoveAnim.elapsed += simDt;
-      const t = Math.min(1, this.activeMoveAnim.elapsed / this.activeMoveAnim.duration);
-      const vis = this.pieceVisuals.get(this.activeMoveAnim.pieceId);
+      const anim = this.activeMoveAnim;
+      const elapsed = Math.max(0, (performance.now() - anim.startedAt) / 1000);
+      const sample = sampleBoardMoveTimeline(elapsed);
+      const vis = this.pieceVisuals.get(anim.pieceId);
       if (vis) {
-        const eased = 1 - Math.pow(1 - t, 3);
-        vis.group.position.lerpVectors(
-          this.activeMoveAnim.startPos,
-          this.activeMoveAnim.endPos,
-          eased,
-        );
-        vis.group.position.y += Math.sin(t * Math.PI) * 0.62;
+        vis.group.position.lerpVectors(anim.startPos, anim.endPos, sample.travel);
+        vis.group.position.y += sample.lift * 0.62;
       }
-      if (t >= 1) {
+      if (sample.landed && !anim.landingNotified) {
+        anim.landingNotified = true;
+        for (const id of anim.capturedIds) {
+          const captured = this.pieceVisuals.get(id);
+          if (!captured) continue;
+          this.piecesGroup.remove(captured.group);
+          const faceMat = captured.group.userData?.faceMat as THREE.Material | undefined;
+          faceMat?.dispose();
+          this.pieceVisuals.delete(id);
+        }
+        this.effects.triggerImpactBurst(anim.row, anim.col, anim.heavy, anim.side);
+        if (anim.heavy) {
+          this.hitstopTimer = 0.045;
+          this.trauma = Math.min(1, this.trauma + anim.trauma);
+        }
+        this.callbacks.onMoveLanded?.({
+          pieceId: anim.pieceId,
+          seq: anim.seq,
+          row: anim.row,
+          col: anim.col,
+          side: anim.side,
+        });
+      }
+      if (elapsed >= MOVE_PIECE_DURATION_S) {
         this.activeMoveAnim = null;
+        this.callbacks.onMoveSettled?.({
+          pieceId: anim.pieceId,
+          seq: anim.seq,
+          row: anim.row,
+          col: anim.col,
+          side: anim.side,
+        });
       }
     }
 
     // 2. Character animations (Bot Master + Guest Challenger)
+    const gestureRate = 1 / MOVE_PIECE_DURATION_S;
     if (this.botGestureProgress < 1) {
-      this.botGestureProgress = Math.min(1, this.botGestureProgress + simDt * 1.65);
+      this.botGestureProgress = Math.min(1, this.botGestureProgress + rawDt * gestureRate);
     }
     if (this.guestGestureProgress < 1) {
-      this.guestGestureProgress = Math.min(1, this.guestGestureProgress + simDt * 1.65);
+      this.guestGestureProgress = Math.min(1, this.guestGestureProgress + rawDt * gestureRate);
     }
 
     updateCharacterAnimation(this.botRig, this.elapsed, dt, {
