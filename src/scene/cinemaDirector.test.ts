@@ -1,9 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import type { KillPatternId } from '../engine/patterns';
 import {
   boardCoordToCinemaWorld,
   createInitialCinemaDirector,
+  killPatternPresentation,
   resolveCinemaVisualPlate,
+  resolveKillPatternAudioCue,
   stepCinemaDirector,
 } from './cinemaDirector';
 
@@ -202,6 +205,114 @@ test('resolveCinemaVisualPlate routes move_piece, sip_tea, tease, Live2D speakin
       isSpeaking: true,
     }),
     'wide_pavilion',
+  );
+});
+
+test('every detected sat phap has a presentation cue, and a quiet shape never sounds a check', () => {
+  const ids: KillPatternId[] = [
+    'dai_dao_hoach_tam',
+    'ma_hau_phao',
+    'trong_phao',
+    'be_cung',
+    'bach_kiem_tuong',
+    'bat_hoang_ma',
+    'thiet_mon_thuyen',
+    'thien_dia_phao',
+    'hai_de_lao_nguyet',
+    'giap_xa_phao',
+    'song_xa_thac',
+    'ngo_tao_ma',
+    'qua_giac_ma',
+    'dieu_ngu_ma',
+    'phao_nan_dan_sa',
+    'tam_tu_quy_bien',
+    'khong_dau_phao',
+  ];
+  const shots = new Set(['wide_pavilion', 'medium_bride', 'over_shoulder', 'table_hands', 'dramatic_orbit', 'closeup_cgi']);
+  const audio = new Set(['check', 'capture', 'guzheng']);
+  for (const id of ids) {
+    const cue = killPatternPresentation(id);
+    assert.ok(shots.has(cue.shot), `${id} has no usable shot`);
+    assert.ok(audio.has(cue.audio), `${id} has no usable audio`);
+  }
+  assert.deepEqual(killPatternPresentation('ngo_tao_ma'), {
+    shot: 'dramatic_orbit',
+    audio: 'check',
+  });
+  assert.equal(resolveKillPatternAudioCue('ngo_tao_ma', true), 'check');
+  assert.equal(resolveKillPatternAudioCue('ngo_tao_ma', false), null);
+  assert.equal(resolveKillPatternAudioCue('tam_tu_quy_bien', false), 'capture');
+});
+
+test('a pattern move gets its own auto shot, while a manual camera choice still wins', () => {
+  const dir = createInitialCinemaDirector();
+  const moveEvent = {
+    side: 'black' as const,
+    from: { row: 7, col: 0 },
+    to: { row: 7, col: 2 },
+    captured: false,
+    inCheck: false,
+    pieceId: 'b_chariot_1',
+    killPatternId: 'tam_tu_quy_bien' as KillPatternId,
+    seq: 1,
+  };
+  const onMove = stepCinemaDirector(dir, {
+    dt: 0.05,
+    requestedAngle: 'auto',
+    emotion: 'calm',
+    isSpeaking: false,
+    botThinking: false,
+    inCheck: false,
+    moveEvent,
+    actionCue: null,
+  });
+  assert.equal(onMove.camera.shot, 'wide_pavilion');
+  assert.equal(onMove.movePresentationShot, 'wide_pavilion');
+  assert.equal(
+    resolveCinemaVisualPlate({
+      requestedAngle: 'auto',
+      directorShot: onMove.camera.shot,
+      brideAction: onMove.bridePose.action,
+      groomAction: onMove.groomPose.action,
+      isSpeaking: false,
+      movePresentationShot: onMove.movePresentationShot,
+    }),
+    'wide_pavilion',
+  );
+  assert.equal(
+    resolveCinemaVisualPlate({
+      requestedAngle: 'table_hands',
+      directorShot: onMove.camera.shot,
+      brideAction: onMove.bridePose.action,
+      groomAction: onMove.groomPose.action,
+      isSpeaking: false,
+      movePresentationShot: onMove.movePresentationShot,
+    }),
+    'table_hands',
+  );
+
+  const closeupDir = createInitialCinemaDirector();
+  const closeup = stepCinemaDirector(closeupDir, {
+    dt: 0.05,
+    requestedAngle: 'auto',
+    emotion: 'fierce',
+    isSpeaking: false,
+    botThinking: false,
+    inCheck: true,
+    moveEvent: { ...moveEvent, inCheck: true, killPatternId: 'ma_hau_phao', seq: 1 },
+    actionCue: null,
+  });
+  assert.equal(closeup.movePresentationShot, 'closeup_cgi');
+  assert.equal(
+    resolveCinemaVisualPlate({
+      requestedAngle: 'auto',
+      directorShot: closeup.camera.shot,
+      brideAction: closeup.bridePose.action,
+      groomAction: closeup.groomPose.action,
+      isSpeaking: false,
+      movePresentationShot: closeup.movePresentationShot,
+    }),
+    'closeup_cgi',
   );
 });
 

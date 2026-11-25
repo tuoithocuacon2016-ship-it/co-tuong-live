@@ -6,6 +6,7 @@
  * tea-sip cup handoff, and playful teasing gesture can be unit-tested deterministically.
  */
 
+import { KillPatternId } from '../engine/patterns';
 import { Coord, Side } from '../engine/xiangqi';
 import { HostEmotion } from './portraitKinematics';
 
@@ -19,6 +20,45 @@ export type CinemaCameraAngle =
   | 'closeup_cgi';
 
 export type ResolvedCinemaShot = Exclude<CinemaCameraAngle, 'auto' | 'closeup_cgi'>;
+
+export type KillPatternAudioCue = 'check' | 'capture' | 'guzheng';
+
+export interface KillPatternPresentation {
+  shot: CinemaVisualPlate;
+  audio: KillPatternAudioCue;
+}
+
+const KILL_PATTERN_PRESENTATION: Record<KillPatternId, KillPatternPresentation> = {
+  dai_dao_hoach_tam: { shot: 'dramatic_orbit', audio: 'capture' },
+  ma_hau_phao: { shot: 'closeup_cgi', audio: 'guzheng' },
+  trong_phao: { shot: 'table_hands', audio: 'check' },
+  be_cung: { shot: 'closeup_cgi', audio: 'check' },
+  bach_kiem_tuong: { shot: 'dramatic_orbit', audio: 'check' },
+  bat_hoang_ma: { shot: 'table_hands', audio: 'capture' },
+  thiet_mon_thuyen: { shot: 'dramatic_orbit', audio: 'check' },
+  thien_dia_phao: { shot: 'wide_pavilion', audio: 'guzheng' },
+  hai_de_lao_nguyet: { shot: 'table_hands', audio: 'check' },
+  giap_xa_phao: { shot: 'dramatic_orbit', audio: 'capture' },
+  song_xa_thac: { shot: 'wide_pavilion', audio: 'check' },
+  ngo_tao_ma: { shot: 'dramatic_orbit', audio: 'check' },
+  qua_giac_ma: { shot: 'over_shoulder', audio: 'check' },
+  dieu_ngu_ma: { shot: 'table_hands', audio: 'check' },
+  phao_nan_dan_sa: { shot: 'table_hands', audio: 'capture' },
+  tam_tu_quy_bien: { shot: 'wide_pavilion', audio: 'capture' },
+  khong_dau_phao: { shot: 'over_shoulder', audio: 'check' },
+};
+
+export function killPatternPresentation(id: KillPatternId): KillPatternPresentation {
+  return KILL_PATTERN_PRESENTATION[id];
+}
+
+export function resolveKillPatternAudioCue(
+  id: KillPatternId,
+  forcing: boolean,
+): KillPatternAudioCue | null {
+  const cue = KILL_PATTERN_PRESENTATION[id].audio;
+  return cue === 'check' && !forcing ? null : cue;
+}
 
 export type CharacterActionType =
   | 'idle'
@@ -36,6 +76,7 @@ export interface MoveChoreoPayload {
   captured: boolean;
   inCheck: boolean;
   pieceId: string;
+  killPatternId?: KillPatternId | null;
   seq: number;
 }
 
@@ -98,6 +139,7 @@ export interface CinemaDirectorState {
   activeStageDirectionVi: string | null;
   stageDirectionExpiresAt: number;
   lastCutWasSharp: boolean;
+  movePresentationShot: CinemaVisualPlate | null;
 }
 
 export const CINEMA_SHOT_LABELS_VI: Record<CinemaCameraAngle, string> = {
@@ -169,6 +211,7 @@ export function createInitialCinemaDirector(): CinemaDirectorState {
     activeStageDirectionVi: null,
     stageDirectionExpiresAt: 0,
     lastCutWasSharp: false,
+    movePresentationShot: null,
   };
 }
 
@@ -209,6 +252,7 @@ export interface CinemaStepResult {
   camera: CameraShotSample;
   bridePose: CharacterPoseSample;
   groomPose: CharacterPoseSample;
+  movePresentationShot: CinemaVisualPlate | null;
 }
 
 function evaluateCharacterPose(
@@ -437,11 +481,19 @@ export function stepCinemaDirector(
     }
   }
 
+  if (state.brideAction.type !== 'move_piece' && state.groomAction.type !== 'move_piece') {
+    state.movePresentationShot = null;
+  }
+
   // 2. React to newly committed chess move (articulated arm picks up & moves the real 3D piece!)
   if (input.moveEvent && input.moveEvent.seq !== state.lastMoveSeq) {
     state.lastMoveSeq = input.moveEvent.seq;
     state.activeStageDirectionVi = null;
     const isBrideMove = input.moveEvent.side === 'black';
+    const presentation = input.moveEvent.killPatternId
+      ? killPatternPresentation(input.moveEvent.killPatternId)
+      : null;
+    state.movePresentationShot = presentation?.shot ?? null;
     const actor = isBrideMove ? state.brideAction : state.groomAction;
     startAction(actor, 'move_piece', 1.55, {
       fromCoord: input.moveEvent.from,
@@ -458,11 +510,14 @@ export function stepCinemaDirector(
     }
 
     if (input.requestedAngle === 'auto') {
-      state.activeShot = input.moveEvent.inCheck
-        ? 'dramatic_orbit'
-        : isBrideMove
-          ? 'over_shoulder'
-          : 'table_hands';
+      state.activeShot =
+        presentation && presentation.shot !== 'closeup_cgi'
+          ? presentation.shot
+          : input.moveEvent.inCheck
+            ? 'dramatic_orbit'
+            : isBrideMove
+              ? 'over_shoulder'
+              : 'table_hands';
       state.shotTimer = 0;
       state.lastCutWasSharp = true;
     }
@@ -611,6 +666,7 @@ export function stepCinemaDirector(
     },
     bridePose,
     groomPose,
+    movePresentationShot: state.movePresentationShot,
   };
 }
 
@@ -626,12 +682,13 @@ export function resolveCinemaVisualPlate(params: {
   brideAction: CharacterActionType;
   groomAction: CharacterActionType;
   isSpeaking: boolean;
+  movePresentationShot?: CinemaVisualPlate | null;
 }): CinemaVisualPlate {
   if (params.requestedAngle !== 'auto') {
     return params.requestedAngle;
   }
   if (params.brideAction === 'move_piece' || params.groomAction === 'move_piece') {
-    return 'table_hands';
+    return params.movePresentationShot ?? 'table_hands';
   }
   if (params.brideAction === 'sip_tea') {
     return 'medium_bride';

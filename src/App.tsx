@@ -57,7 +57,7 @@ import {
   detectMatchPhase,
   shouldVoiceCommentary,
 } from './engine/livePerformance';
-import { detectKillPattern } from './engine/patterns';
+import { detectKillPattern, patternNameVi } from './engine/patterns';
 import {
   BridalLadder,
   DOWRY_LAYERS,
@@ -116,6 +116,7 @@ import {
   ActionCuePayload,
   CinemaCameraAngle,
   MoveChoreoPayload,
+  resolveKillPatternAudioCue,
 } from './scene/cinemaDirector';
 import { CommentaryVoiceName, wuxiaAudio } from './utils/wuxiaAudio';
 import { voiceMoveListener } from './utils/voiceMoveListener';
@@ -825,8 +826,37 @@ export default function App() {
         setPreferredPieceId(move.piece.id);
       }
 
+      const playedMotif = detectMoveMotif(
+        currentBoard.grid,
+        move,
+        nextBoard.grid,
+        nightRef.current.focusPattern,
+      );
+      // The dowry follows the strongest pattern on the board, not the one tonight advertised: the
+      // focus decides what the room is told, never what the bride pays.
+      const killStrike = detectKillPattern(currentBoard.grid, nextBoard.grid, move);
+      // The focus may be real but not nameable on this ply. Only the hit that matches the banner
+      // drives her line, shot and audio, so the presentation cannot invent a second sát pháp.
+      const spokenPattern = detectKillPattern(
+        currentBoard.grid,
+        nextBoard.grid,
+        move,
+        nightRef.current.focusPattern,
+      );
+      const namedPattern =
+        [spokenPattern, killStrike].find(
+          (hit) => hit && patternNameVi(hit.id) === playedMotif,
+        ) ?? null;
+
       // Crisp board audio FX scaled to move weight
-      if (nextBoard.inCheck) {
+      const patternAudio = namedPattern
+        ? resolveKillPatternAudioCue(namedPattern.id, namedPattern.forcing)
+        : null;
+      if (patternAudio === 'guzheng') {
+        wuxiaAudio.playGuzhengSweep();
+      } else if (patternAudio === 'capture') {
+        wuxiaAudio.playCapture();
+      } else if (patternAudio === 'check' || nextBoard.inCheck) {
         wuxiaAudio.playCheck();
       } else if (move.captured) {
         wuxiaAudio.playCapture();
@@ -861,6 +891,7 @@ export default function App() {
         captured: Boolean(move.captured),
         inCheck: nextBoard.inCheck !== null,
         pieceId: move.piece.id,
+        killPatternId: namedPattern?.id ?? null,
       });
 
       appendMessage({
@@ -868,24 +899,6 @@ export default function App() {
         text: `${notation}${nextBoard.inCheck ? ' — CHIẾU TƯỚNG!' : ''}`,
         kind: side === 'red' ? 'move' : 'bot',
       });
-
-      const playedMotif = detectMoveMotif(
-        currentBoard.grid,
-        move,
-        nextBoard.grid,
-        nightRef.current.focusPattern,
-      );
-      // The dowry follows the strongest pattern on the board, not the one tonight advertised: the
-      // focus decides what the room is told, never what the bride pays.
-      const killStrike = detectKillPattern(currentBoard.grid, nextBoard.grid, move);
-      // ...but the spoken line is keyed to the name the room was actually told, so her copy and the
-      // banner cannot put two different sát pháp on one ply.
-      const spokenPattern = detectKillPattern(
-        currentBoard.grid,
-        nextBoard.grid,
-        move,
-        nightRef.current.focusPattern,
-      );
 
       // The dowry only moves when a checking pattern really lands on the bride, or when she
       // loses the game - it is a consequence on the board, never a scripted handicap.
@@ -976,7 +989,7 @@ export default function App() {
           prevWinProbRed,
           recentLines: recentLinesRef.current,
           ladderStep: countLadderStep(dowryRef.current),
-          killPatternId: spokenPattern?.id ?? null,
+          killPatternId: namedPattern?.id ?? null,
         });
         recordRecentLine(fallbackEnd.line);
         setCommentary(fallbackEnd);
@@ -1204,7 +1217,7 @@ export default function App() {
         prevWinProbRed,
         recentLines: recentLinesRef.current,
         ladderStep: countLadderStep(dowryRef.current),
-        killPatternId: spokenPattern?.id ?? null,
+        killPatternId: namedPattern?.id ?? null,
       });
 
       const expectedToken = precomputed?.turnToken ?? turnSeqRef.current;

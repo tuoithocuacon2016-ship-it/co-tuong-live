@@ -298,6 +298,7 @@ export const CinematicPavilionPane: React.FC<CinematicPavilionPaneProps> = ({
         brideAction: step.bridePose.action,
         groomAction: step.groomPose.action,
         isSpeaking: props.isSpeaking,
+        movePresentationShot: step.movePresentationShot,
       });
 
       const nextShotLabel = CINEMA_SHOT_LABELS_VI[nextPlate];
