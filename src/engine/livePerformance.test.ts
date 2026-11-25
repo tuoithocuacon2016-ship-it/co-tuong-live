@@ -9,6 +9,7 @@ import {
   buildLiveSessionBeat,
   buildMovePerformanceScript,
   buildBlackReplyEvaluation,
+  buildRepetitionWarningScript,
   classifyTacticalEvent,
   detectMatchPhase,
   resolvePronounProfile,
@@ -186,6 +187,69 @@ test('tactical praise and blame stay on Red while Black reads the same Red-relat
     }),
     'comeback_player',
   );
+});
+
+test('terminal performance copy stays profile-aware for female and elder challengers', () => {
+  const board0 = createInitialBoard();
+  const move = generateLegalMoves(board0.grid, 'red')[0];
+  assert.ok(move);
+  const analysis = analyzePosition(board0, 'nhap_mon');
+  const profiles = [
+    { gender: 'nu' as const, age: 24 },
+    { gender: 'nu' as const, age: 38 },
+    { gender: 'nam' as const, age: 62 },
+  ];
+  const endings = [
+    { status: 'red_win', statusReason: 'checkmate' },
+    { status: 'black_win', statusReason: 'checkmate' },
+    { status: 'draw', statusReason: 'repetition_draw' },
+    { status: 'draw', statusReason: 'sixty_move_draw' },
+    { status: 'red_win', statusReason: 'perpetual_check' },
+  ] as const;
+
+  for (const profile of profiles) {
+    for (const ending of endings) {
+      for (let seed = 0; seed < 6; seed += 1) {
+        const script = buildMovePerformanceScript({
+          boardAfter: { ...board0, ...ending, moveCount: 30 + seed },
+          move,
+          playedMotif: '',
+          analysis,
+          challengerName: '@KiemKhach_VN',
+          guestGender: profile.gender,
+          guestAge: profile.age,
+          scoreDeltaForRed: 0,
+          recentLines: [],
+        });
+        assert.doesNotMatch(script.line, /chàng|thiếp|phu thê|hai họ/i);
+      }
+    }
+  }
+});
+
+test('repetition warnings address the challenger without hardcoded bridal honorifics', () => {
+  const profiles = [
+    { gender: 'nu' as const, age: 24 },
+    { gender: 'nu' as const, age: 38 },
+    { gender: 'nam' as const, age: 62 },
+  ];
+
+  for (const profile of profiles) {
+    for (const offender of ['red', 'black'] as const) {
+      for (const seed of [0, 1]) {
+        const script = buildRepetitionWarningScript({
+          offender,
+          challengerName: '@KiemKhach_VN',
+          guestGender: profile.gender,
+          guestAge: profile.age,
+          moveCount: 12,
+          recentLines: [],
+          seed,
+        });
+        assert.doesNotMatch(script.line, /chàng|thiếp|phu thê|hai họ/i);
+      }
+    }
+  }
 });
 
 test('buildLiveSessionBeat generates rich non-repeating lines with synced gestures and pause punctuation', () => {
