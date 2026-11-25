@@ -118,7 +118,7 @@ interface BottomControlDockProps {
   onSelectSpeechRate: (rate: number) => void;
   onTestVoice: () => void;
   onResetMatch: () => void;
-  onTestWebhook: () => void;
+  onTestWebhook: (ingestToken: string) => void;
 }
 
 const CONCESSION_FLANKS: { id: Flank; label: string }[] = [
@@ -208,6 +208,7 @@ export const BottomControlDock: React.FC<BottomControlDockProps> = ({
   const [copiedWebhook, setCopiedWebhook] = useState(false);
 
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const webhookTokenRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     setChatUser(activeChallenger.username);
@@ -231,6 +232,14 @@ export const BottomControlDock: React.FC<BottomControlDockProps> = ({
     if (!trimmed) return;
     onSubmitChat(chatUser.trim() || activeChallenger.username, trimmed);
     setChatText('');
+  };
+
+  const handleWebhookTestSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const input = webhookTokenRef.current;
+    const token = input?.value.trim() ?? '';
+    if (input) input.value = '';
+    onTestWebhook(token);
   };
 
   const webhookUrl =
@@ -1107,28 +1116,42 @@ export const BottomControlDock: React.FC<BottomControlDockProps> = ({
                       Kết nối TikFinity / OBS Relay gửi POST JSON tới endpoint bên dưới để đọc bình luận TikTok thật theo thời gian thực.
                     </p>
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="text"
-                      readOnly
-                      aria-label="URL Webhook TikTok Live"
-                      value={webhookUrl}
-                      className="flex-1 min-w-0 px-2 py-1 rounded bg-[#18131c] border border-[#d4a44e]/25 font-mono-num text-[10px] text-[#dfd1ba]"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleCopyWebhook}
-                      className="px-2.5 py-1 rounded bg-[#251f29] hover:bg-[#352c3b] text-[#f3dfb6] text-[11px] border border-[#d4a44e]/30 whitespace-nowrap cursor-pointer"
-                    >
-                      {copiedWebhook ? 'Đã chép' : 'Chép'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={onTestWebhook}
-                      className="px-2.5 py-1 rounded bg-[#8f261f] hover:bg-[#a92d25] text-[#fdf4e3] text-[11px] font-medium whitespace-nowrap cursor-pointer"
-                    >
-                      Thử Live
-                    </button>
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        readOnly
+                        aria-label="URL Webhook TikTok Live"
+                        value={webhookUrl}
+                        className="flex-1 min-w-0 px-2 py-1 rounded bg-[#18131c] border border-[#d4a44e]/25 font-mono-num text-[10px] text-[#dfd1ba]"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleCopyWebhook}
+                        className="px-2.5 py-1 rounded bg-[#251f29] hover:bg-[#352c3b] text-[#f3dfb6] text-[11px] border border-[#d4a44e]/30 whitespace-nowrap cursor-pointer"
+                      >
+                        {copiedWebhook ? 'Đã chép' : 'Chép'}
+                      </button>
+                    </div>
+                    <form onSubmit={handleWebhookTestSubmit} className="flex items-center gap-1.5">
+                      <input
+                        ref={webhookTokenRef}
+                        type="password"
+                        autoComplete="off"
+                        aria-label="Token ingest tạm thời"
+                        placeholder="Token ingest (chỉ dùng lần thử này)"
+                        className="flex-1 min-w-0 px-2 py-1 rounded bg-[#18131c] border border-[#d4a44e]/25 text-[10px] text-[#dfd1ba]"
+                      />
+                      <button
+                        type="submit"
+                        className="px-2.5 py-1 rounded bg-[#8f261f] hover:bg-[#a92d25] text-[#fdf4e3] text-[11px] font-medium whitespace-nowrap cursor-pointer shrink-0"
+                      >
+                        Thử Live
+                      </button>
+                    </form>
+                    <p className="text-[10px] text-[#9f907b] leading-snug">
+                      Token bị xóa khỏi ô ngay sau khi gửi và không được lưu vào trình duyệt.
+                    </p>
                   </div>
                 </div>
               </div>
