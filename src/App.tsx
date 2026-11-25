@@ -51,6 +51,7 @@ import {
   MATCH_PHASE_LABELS_VI,
   PerformanceGesture,
   PerformanceScript,
+  buildLiveEntryPlan,
   buildLiveSessionBeat,
   buildNightTeaseScript,
   buildRepetitionWarningScript,
@@ -321,6 +322,7 @@ export default function App() {
   // and strand a game halfway through a different night's book line.
   const nightRef = useRef<NightTheme>(resolveNightTheme(new Date()));
   const openingShapeRef = useRef<RedOpeningShape>('bat_ky');
+  const autostartHandledRef = useRef(false);
   const [moveEvent, setMoveEvent] = useState<MoveChoreoPayload | null>(null);
   const [actionCue, setActionCue] = useState<ActionCuePayload | null>(null);
   const focusSeqRef = useRef(0);
@@ -2535,8 +2537,18 @@ export default function App() {
         document.activeElement.blur();
       }
       setAudienceWaveOn(withAudience);
-      setAppState('playing');
-      document.body.dataset.state = 'playing';
+      const guest = activeChallengerRef.current;
+      const entry = buildLiveEntryPlan({
+        night: nightRef.current,
+        board: boardRef.current,
+        ladder: dowryRef.current,
+        challengerName: guest.username,
+        guestGender: guest.gender,
+        guestAge: guest.age,
+        recentLines: recentLinesRef.current,
+      });
+      setAppState(entry.appState);
+      document.body.dataset.state = entry.appState;
       setSplitScreen(true);
       setZoomFocus('bot');
       setCameraPreset('liveBot');
@@ -2546,24 +2558,22 @@ export default function App() {
       stageRef.current?.setCameraPreset('liveBot');
       wuxiaAudio.playGuzhengSweep();
 
-      const guest = activeChallengerRef.current;
-      const opening = buildNightTeaseScript({
-        night: nightRef.current,
-        board: boardRef.current,
-        ladder: dowryRef.current,
-        challengerName: guest.username,
-        guestGender: guest.gender,
-        guestAge: guest.age,
-        recentLines: recentLinesRef.current,
-      });
-      performScriptBeat(opening, {
-        moveNumber: boardRef.current.moveCount,
-        notation: 'Khai Đài Live',
-      });
-      if (boardRef.current.moveCount === 0) speakConcessionClaim(3800);
+      if (entry.opening) {
+        performScriptBeat(entry.opening, {
+          moveNumber: boardRef.current.moveCount,
+          notation: 'Khai Đài Live',
+        });
+      }
+      if (entry.speakConcessionClaim) speakConcessionClaim(3800);
     },
     [performScriptBeat, speakConcessionClaim],
   );
+
+  useEffect(() => {
+    if (!checkAutostart() || autostartHandledRef.current) return;
+    autostartHandledRef.current = true;
+    handleStartLive(true);
+  }, [handleStartLive]);
 
   const handleResetMatch = useCallback(() => {
     turnSeqRef.current++;
@@ -2605,16 +2615,8 @@ export default function App() {
     setBotThinking(false);
     setTurnSecondsLeft(45);
     setMoveHintError(null);
-    setAppState('playing');
-    document.body.dataset.state = 'playing';
-
-    stageRef.current?.syncBoard(fresh, null, false);
-    stageRef.current?.setSelectionOverlay(null, []);
-    stageRef.current?.updateAnalysisVisuals(fresh, freshAnalysis, showAnalysis, null);
-    stageRef.current?.setBotState('calm', false);
-
     const guest = activeChallengerRef.current;
-    const resetBeat = buildNightTeaseScript({
+    const entry = buildLiveEntryPlan({
       night: nightRef.current,
       board: fresh,
       ladder: dowryRef.current,
@@ -2623,10 +2625,17 @@ export default function App() {
       guestAge: guest.age,
       recentLines: [],
     });
-    performScriptBeat(resetBeat, { moveNumber: 0, notation: 'Khai Cuộc Mới' });
+    setAppState(entry.appState);
+    document.body.dataset.state = entry.appState;
+
+    stageRef.current?.syncBoard(fresh, null, false);
+    stageRef.current?.setSelectionOverlay(null, []);
+    stageRef.current?.updateAnalysisVisuals(fresh, freshAnalysis, showAnalysis, null);
+    stageRef.current?.setBotState('calm', false);
+
+    if (entry.opening) performScriptBeat(entry.opening, { moveNumber: 0, notation: 'Khai Cuộc Mới' });
     wuxiaAudio.playGuzhengSweep();
-    // She says the opening first, then what she is giving away - one voice, two lines, in that order.
-    speakConcessionClaim(3800);
+    if (entry.speakConcessionClaim) speakConcessionClaim(3800);
   }, [concession, performScriptBeat, showAnalysis, speakConcessionClaim]);
 
   const handleSelectCamera = useCallback((preset: CameraPreset) => {

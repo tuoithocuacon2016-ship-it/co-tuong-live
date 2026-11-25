@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createInitialBoard, generateLegalMoves, makeMove } from './xiangqi';
 import { analyzePosition, detectMoveMotif } from './ai';
+import { initialLadder } from './bridalLadder';
+import { NIGHT_THEMES } from './nightThemes';
 import {
+  buildLiveEntryPlan,
   buildLiveSessionBeat,
   buildMovePerformanceScript,
   detectMatchPhase,
@@ -146,4 +149,49 @@ test('buildLiveSessionBeat generates rich non-repeating lines with synced gestur
   });
   assert.ok(giftBeat.line.includes('HoaHong_VIP'));
   assert.ok(giftBeat.line.includes('Hoa Hồng Đỏ'));
+});
+
+test('live entry announces an opening only on a fresh playable board', () => {
+  const base = {
+    night: NIGHT_THEMES[0],
+    ladder: initialLadder(),
+    challengerName: '@KiemKhach_VN',
+    guestGender: 'nam' as const,
+    guestAge: 26,
+    seed: 1,
+  };
+  const fresh = buildLiveEntryPlan({ ...base, board: createInitialBoard() });
+  assert.equal(fresh.appState, 'playing');
+  assert.ok(fresh.opening);
+  assert.equal(fresh.opening.phase, 'khai_cuoc');
+  assert.equal(fresh.speakConcessionClaim, true);
+
+  const moves = generateLegalMoves(createInitialBoard().grid, 'red');
+  const first = moves.find(
+    (move) => move.piece.type === 'cannon' && move.from.col === 7 && move.to.col === 4,
+  );
+  assert.ok(first);
+  const resumed = buildLiveEntryPlan({
+    ...base,
+    board: makeMove(createInitialBoard(), first),
+  });
+  assert.equal(resumed.appState, 'playing');
+  assert.equal(resumed.opening, null);
+  assert.equal(resumed.speakConcessionClaim, false);
+});
+
+test('live entry reopens the result modal instead of narrating a terminal board as fresh', () => {
+  const terminal = buildLiveEntryPlan({
+    night: NIGHT_THEMES[0],
+    board: { ...createInitialBoard(), status: 'draw' },
+    ladder: initialLadder(),
+    challengerName: '@KiemKhach_VN',
+    guestGender: 'nam',
+    guestAge: 26,
+    seed: 1,
+  });
+
+  assert.equal(terminal.appState, 'gameover');
+  assert.equal(terminal.opening, null);
+  assert.equal(terminal.speakConcessionClaim, false);
 });
