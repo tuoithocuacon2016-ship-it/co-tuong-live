@@ -5,7 +5,7 @@ import { createInitialBoard, generateLegalMoves, makeMove } from './xiangqi';
 import type { BoardState, Move } from './xiangqi';
 import { formatMoveVietnamese } from './notation';
 import { analyzePosition } from './ai';
-import { forfeitForPattern, initialLadder, layerById } from './bridalLadder';
+import { forfeitForPattern, initialLadder, layerById, type BridalLadder } from './bridalLadder';
 import { COMMENTARY_TOKENS } from './commentaryBank';
 import { buildNightTeaseScript } from './livePerformance';
 import {
@@ -17,6 +17,7 @@ import {
   detectRedOpeningShape,
   nightBookFavour,
   nightIndexFromDate,
+  nightDowryStatus,
   nightThemeByIndex,
   resolveNightTheme,
 } from './nightThemes';
@@ -120,6 +121,22 @@ test('the night headline names the layer its focus pattern actually takes', () =
         `${theme.nameVi}: ${theme.focusPattern} takes ${strike.lost.id}, not the advertised layer`,
       );
     }
+  }
+});
+
+test('the HUD names the dowry layer tonight hangs, and notices when it changes hands', () => {
+  for (const theme of NIGHT_THEMES) {
+    const held = nightDowryStatus(theme, initialLadder());
+    assert.equal(held.layerNameVi, layerById(theme.headlineLayer).nameVi);
+    assert.equal(held.held, true);
+    assert.equal(held.labelVi, `Treo ${held.layerNameVi}`);
+
+    const stripped: BridalLadder = {
+      held: initialLadder().held.filter((id) => id !== theme.headlineLayer),
+    };
+    const lost = nightDowryStatus(theme, stripped);
+    assert.equal(lost.held, false);
+    assert.equal(lost.labelVi, `Đã giao ${held.layerNameVi}`);
   }
 });
 

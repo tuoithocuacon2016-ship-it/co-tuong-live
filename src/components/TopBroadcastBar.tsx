@@ -11,6 +11,7 @@ import { Side } from '../engine/xiangqi';
 import { BOT_MASTER_PROFILE } from '../data/characters';
 import { ChallengerEntry } from '../engine/matchmaker';
 import { BridalLadder, DOWRY_LAYERS, isHeld } from '../engine/bridalLadder';
+import { NightTheme, nightDowryStatus } from '../engine/nightThemes';
 import {
   PIECE_LABEL_MODES,
   PIECE_THEMES,
@@ -32,6 +33,7 @@ interface TopBroadcastBarProps {
   tiktokFrame: boolean;
   viewerCount: number;
   dowry: BridalLadder;
+  night: NightTheme;
   liveMode?: 'duel_1v1' | 'crowd_vote';
   awaitingReadyCheck?: boolean;
   pieceStyle: PieceVisualConfig;
@@ -59,6 +61,7 @@ export const TopBroadcastBar: React.FC<TopBroadcastBarProps> = ({
   tiktokFrame,
   viewerCount,
   dowry,
+  night,
   liveMode = 'duel_1v1',
   awaitingReadyCheck = false,
   pieceStyle,
@@ -78,6 +81,8 @@ export const TopBroadcastBar: React.FC<TopBroadcastBarProps> = ({
   const dowryHeldNames = DOWRY_LAYERS.filter((layer) => isHeld(dowry, layer.id))
     .map((layer) => layer.nameVi)
     .join(', ');
+  const nightDowry = nightDowryStatus(night, dowry);
+  const nightChapter = night.nameVi.split(' · ').slice(1).join(' · ') || night.nameVi;
 
   return (
     <div
@@ -117,6 +122,18 @@ export const TopBroadcastBar: React.FC<TopBroadcastBarProps> = ({
             </div>
             <span className="font-mono-num text-[11px] text-[#e5cfa4] whitespace-nowrap">
               Nội lực {scoreFormatted}
+            </span>
+          </div>
+
+          <div
+            className="mt-1.5 flex items-center gap-1.5 text-[10px] min-w-0"
+            aria-label={`${night.nameVi}: ${nightDowry.labelVi}`}
+            title={`${night.nameVi}: ${nightDowry.labelVi}`}
+          >
+            <span className="text-[#9c8c75] truncate">{nightChapter}</span>
+            <span aria-hidden="true" className="text-[#695c4d]">·</span>
+            <span className={`font-medium whitespace-nowrap ${nightDowry.held ? 'text-[#e5b864]' : 'text-[#f38072]'}`}>
+              {nightDowry.labelVi}
             </span>
           </div>
         </div>

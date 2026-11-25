@@ -61,6 +61,7 @@ interface TikTokLiveStudioOverlayProps {
   viewerCount: number;
   /** Tonight's chapter title from the six-night rotation. */
   nightName?: string;
+  nightDowryLabel?: string;
   analysis: DeepAnalysisResult;
   commentary: CommentaryItem | null;
   messages: LiveChatMessage[];
@@ -161,6 +162,7 @@ export const TikTokLiveStudioOverlay: React.FC<TikTokLiveStudioOverlayProps> = (
   botThinking,
   viewerCount,
   nightName,
+  nightDowryLabel,
   analysis,
   commentary,
   messages,
@@ -524,6 +526,7 @@ export const TikTokLiveStudioOverlay: React.FC<TikTokLiveStudioOverlayProps> = (
                 <span className="truncate font-semibold">
                   {[
                     nightName,
+                    nightDowryLabel,
                     commentary.phaseLabel,
                     commentary.emotionLabel,
                     commentary.motif,
