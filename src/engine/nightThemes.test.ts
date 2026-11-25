@@ -65,6 +65,20 @@ function replayBookLine(theme: NightTheme) {
   return board;
 }
 
+function renderedNightLines(theme: NightTheme, board: BoardState, ladder: BridalLadder): string[] {
+  return Array.from({ length: theme.teases.length }, (_, seed) =>
+    buildNightTeaseScript({
+      night: theme,
+      board,
+      ladder,
+      challengerName: '@KiemKhach_VN',
+      guestGender: 'nam',
+      guestAge: 26,
+      seed,
+    }).line,
+  );
+}
+
 test('six nights, six dowry layers, one asset set each', () => {
   assert.equal(NIGHT_THEMES.length, NIGHT_COUNT);
   assert.deepEqual(
@@ -242,6 +256,7 @@ test('night copy is tokenised, spoken, and never assumes a groom', () => {
       seen.add(tease.line);
       assert.ok(!cjk.test(tease.line), `${tease.line} leaked a Chinese glyph`);
       assert.ok(!cjk.test(tease.stageDirection), `${tease.stageDirection} leaked a Chinese glyph`);
+      assert.ok(!/tốt lùi/i.test(tease.line), `${tease.line} asks a soldier to retreat`);
       assert.ok(
         !/\b(chàng|thiếp)\b|hai họ/i.test(tease.line),
         `${theme.nameVi} hardcodes the bridal register: ${tease.line}`,
@@ -255,14 +270,21 @@ test('night copy is tokenised, spoken, and never assumes a groom', () => {
 });
 
 test('night lines render through the same pronoun machinery as the bank', () => {
+  const board = { ...createInitialBoard(), moveCount: 12 };
+  const ladder = initialLadder();
   const base = {
+    board,
+    ladder,
     challengerName: '@KiemKhach_VN',
-    moveCount: 12,
     recentLines: [],
   };
 
   for (const theme of NIGHT_THEMES) {
-    for (let seed = 0; seed < theme.teases.length; seed++) {
+    const eligibleCount = theme.teases.filter(
+      (tease) => !tease.when || tease.when({ board, ladder }),
+    ).length;
+    assert.ok(eligibleCount > 0, `${theme.nameVi} has no line for this board`);
+    for (let seed = 0; seed < eligibleCount; seed++) {
       const bridal = buildNightTeaseScript({
         ...base,
         night: theme,
@@ -295,7 +317,7 @@ test('night lines render through the same pronoun machinery as the bank', () => 
 
     // Recency has to suppress the line that actually went out, not the template it came from -
     // the raw {guest} form never matches, so filtering on it would re-broadcast every tease.
-    const spoken = theme.teases.map((_, seed) =>
+    const spoken = Array.from({ length: eligibleCount }, (_, seed) =>
       buildNightTeaseScript({
         ...base,
         night: theme,
@@ -320,10 +342,11 @@ test('every night can open the show in its own voice', () => {
   for (const theme of NIGHT_THEMES) {
     const opening = buildNightTeaseScript({
       night: theme,
+      board: createInitialBoard(),
+      ladder: initialLadder(),
       challengerName: '@KiemKhach_VN',
       guestGender: 'nam',
       guestAge: 26,
-      moveCount: 0,
       recentLines: [],
       seed: theme.index,
     });
@@ -331,6 +354,118 @@ test('every night can open the show in its own voice', () => {
     assert.equal(opening.motif, theme.nameVi, `${theme.nameVi} lost its chapter title`);
     assert.ok(opening.line.length > 30, `${theme.nameVi} had no opening voice`);
   }
+});
+
+test('conceded stones remove night lines that still claim those stones', () => {
+  const choices = [
+    { id: 'khong_chap', flank: 'ben_trai' },
+    { id: 'chap_mot_ma', flank: 'ben_trai' },
+    { id: 'chap_mot_ma', flank: 'ben_phai' },
+    { id: 'chap_hai_ma', flank: 'ca_hai' },
+    { id: 'chap_mot_phao', flank: 'ben_trai' },
+    { id: 'chap_mot_phao', flank: 'ben_phai' },
+    { id: 'chap_mot_xe', flank: 'ben_trai' },
+    { id: 'chap_mot_xe', flank: 'ben_phai' },
+  ] as const;
+  const ladder = initialLadder();
+
+  for (const theme of NIGHT_THEMES) {
+    for (const choice of choices) {
+      const opened = applyHandicap(createInitialBoard(), choice.id, choice.flank);
+      assert.ok(opened.ok, `${theme.nameVi}: ${choice.id}/${choice.flank} must open cleanly`);
+      const lines = renderedNightLines(theme, opened.board, ladder);
+      assert.ok(lines.length > 0, `${theme.nameVi} has no voice after ${choice.id}/${choice.flank}`);
+      const blackHorses = opened.board.grid
+        .flat()
+        .filter((piece) => piece?.side === 'black' && piece.type === 'horse').length;
+      const blackChariots = opened.board.grid
+        .flat()
+        .filter((piece) => piece?.side === 'black' && piece.type === 'chariot').length;
+
+      if (blackHorses < 2) {
+        assert.ok(
+          lines.every((line) => !/hai con ngựa|dàn đủ hai ngựa/i.test(line)),
+          `${theme.nameVi} still claims two horses after ${choice.id}/${choice.flank}`,
+        );
+      }
+      if (blackHorses === 0) {
+        assert.ok(
+          lines.every((line) => !/ngựa nằm ở rãnh|con ngựa phía sau pháo|ngựa của \{self\}/i.test(line)),
+          `${theme.nameVi} still points at a horse after ${choice.id}/${choice.flank}`,
+        );
+      }
+      if (blackChariots < 2) {
+        assert.ok(
+          lines.every((line) => !/hai xe|hai chiếc xe/i.test(line)),
+          `${theme.nameVi} still claims two chariots after ${choice.id}/${choice.flank}`,
+        );
+      }
+    }
+  }
+});
+
+test('night copy follows the dowry pieces actually still held', () => {
+  const full = initialLadder();
+  for (const theme of NIGHT_THEMES) {
+    const ladder = { held: full.held.filter((id) => id !== theme.headlineLayer) };
+    const lines = renderedNightLines(theme, createInitialBoard(), ladder);
+    assert.ok(
+      lines.every(
+        (line) =>
+          !/vẫn còn nguyên|chưa định cởi|đang rung|tự cởi|muốn nghe tiếng nó rơi|bay đi mất/i.test(
+            line,
+          ),
+      ),
+    `${theme.nameVi} still claims a layer it already lost`,
+    );
+  }
+
+  const finale = NIGHT_THEMES[5];
+  assert.ok(
+    renderedNightLines(finale, createInitialBoard(), full).every(
+      (line) => !/còn lại đúng cây nến/i.test(line),
+    ),
+    'the candle-only line cannot open a full dowry',
+  );
+  assert.ok(
+    renderedNightLines(finale, createInitialBoard(), { held: ['nen_hoa_chuc'] }).some((line) =>
+      /còn lại đúng cây nến/i.test(line),
+    ),
+    'the candle-only line belongs to the actual final layer',
+  );
+});
+
+test('book positions unlock the concrete night lines they describe', () => {
+  const expected = new Map<number, string>([
+    [1, 'Hai con ngựa đã vào thế'],
+    [2, 'soi thẳng vào pháo'],
+    [3, 'Ngựa nằm ở rãnh'],
+    [4, 'cửa giữa đã bị'],
+    [5, 'Một chiếc xe đã sang'],
+  ]);
+
+  for (const theme of NIGHT_THEMES) {
+    const phrase = expected.get(theme.index);
+    if (!phrase) continue;
+    const lines = renderedNightLines(theme, replayBookLine(theme), initialLadder());
+    assert.ok(
+      lines.some((line) => line.includes(phrase)),
+      `${theme.nameVi} never speaks its board-true line: ${phrase}`,
+    );
+  }
+});
+
+test('night copy takes its phase from the real board, not a hardcoded opening', () => {
+  const script = buildNightTeaseScript({
+    night: NIGHT_THEMES[0],
+    board: { ...createInitialBoard(), moveCount: 30 },
+    ladder: initialLadder(),
+    challengerName: '@KiemKhach_VN',
+    guestGender: 'nam',
+    guestAge: 26,
+    seed: 0,
+  });
+  assert.equal(script.phase, 'tan_cuoc');
 });
 
 test('the night that concedes gives away the horse her own line does not ride', () => {

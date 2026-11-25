@@ -2535,14 +2535,18 @@ export default function App() {
       const guest = activeChallengerRef.current;
       const opening = buildNightTeaseScript({
         night: nightRef.current,
+        board: boardRef.current,
+        ladder: dowryRef.current,
         challengerName: guest.username,
         guestGender: guest.gender,
         guestAge: guest.age,
-        moveCount: 0,
         recentLines: recentLinesRef.current,
       });
-      performScriptBeat(opening, { moveNumber: 0, notation: 'Khai Đài Live' });
-      speakConcessionClaim(3800);
+      performScriptBeat(opening, {
+        moveNumber: boardRef.current.moveCount,
+        notation: 'Khai Đài Live',
+      });
+      if (boardRef.current.moveCount === 0) speakConcessionClaim(3800);
     },
     [performScriptBeat, speakConcessionClaim],
   );
@@ -2597,10 +2601,11 @@ export default function App() {
     const guest = activeChallengerRef.current;
     const resetBeat = buildNightTeaseScript({
       night: nightRef.current,
+      board: fresh,
+      ladder: dowryRef.current,
       challengerName: guest.username,
       guestGender: guest.gender,
       guestAge: guest.age,
-      moveCount: 0,
       recentLines: [],
     });
     performScriptBeat(resetBeat, { moveNumber: 0, notation: 'Khai Cuộc Mới' });
@@ -2632,10 +2637,11 @@ export default function App() {
         type === 'tease'
           ? buildNightTeaseScript({
               night: nightRef.current,
+              board: boardRef.current,
+              ladder: dowryRef.current,
               challengerName: guest.username,
               guestGender: guest.gender,
               guestAge: guest.age,
-              moveCount: boardRef.current.moveCount,
               recentLines: recentLinesRef.current,
             })
           : buildLiveSessionBeat({

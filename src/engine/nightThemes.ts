@@ -32,11 +32,17 @@ export interface NightBookPly {
   notation: string;
 }
 
+export interface NightCopyContext {
+  board: BoardState;
+  ladder: BridalLadder;
+}
+
 export interface NightTease {
   line: string;
   emotion: HostEmotion;
   gesture: PerformanceGesture;
   stageDirection: string;
+  when?: (context: NightCopyContext) => boolean;
 }
 
 export interface NightTheme {
@@ -84,6 +90,43 @@ const ply = (
   notation,
 });
 
+function pieceCells(context: NightCopyContext, side: Side, type: PieceType): Coord[] {
+  const cells: Coord[] = [];
+  context.board.grid.forEach((row, rowIndex) => {
+    row.forEach((piece, colIndex) => {
+      if (piece?.side === side && piece.type === type) cells.push(sq(rowIndex, colIndex));
+    });
+  });
+  return cells;
+}
+
+function pieceAt(
+  context: NightCopyContext,
+  side: Side,
+  type: PieceType,
+  row: number,
+  col: number,
+): boolean {
+  const piece = context.board.grid[row][col];
+  return piece?.side === side && piece.type === type;
+}
+
+function piecesAwayFromHome(
+  context: NightCopyContext,
+  side: Side,
+  type: 'horse' | 'chariot',
+): Coord[] {
+  const homeCols = type === 'horse' ? [1, 7] : [0, 8];
+  const homeRow = side === 'black' ? 0 : 9;
+  return pieceCells(context, side, type).filter(
+    (cell) => cell.row !== homeRow || !homeCols.includes(cell.col),
+  );
+}
+
+function holdsLayer(context: NightCopyContext, id: DowryLayerId): boolean {
+  return isHeld(context.ladder, id);
+}
+
 export const NIGHT_THEMES: readonly NightTheme[] = [
   {
     index: 1,
@@ -102,24 +145,27 @@ export const NIGHT_THEMES: readonly NightTheme[] = [
         emotion: 'amused',
         gesture: 'tease',
         stageDirection: 'Giữ chặt quạt lụa trước ngực, khẽ nghiêng đầu mời khai cuộc',
+        when: (context) => context.board.moveCount === 0,
       },
       {
         line: `Ngựa giấu dưới cỏ mới là ngựa đáng sợ, {guest} ạ! {self} đang nhắm thế {pattern} - {name} có nhận ra không?`,
         emotion: 'thinking',
         gesture: 'think_fan',
-        stageDirection: 'Phẩy quạt chậm theo hướng hai chú ngựa vừa xuất trận',
+        stageDirection: 'Phẩy quạt chậm theo nhịp bàn cờ',
       },
       {
         line: `Trà đêm nay rót đầy mà {guest} còn mải nhìn bàn cờ! {layer} của {self} vẫn còn nguyên đó, đừng mơ lấy sớm~`,
         emotion: 'calm',
         gesture: 'sip_tea',
         stageDirection: 'Nâng chén trà sen, ánh mắt bình thản quan sát đối thủ',
+        when: (context) => holdsLayer(context, 'qua_tay_lua'),
       },
       {
         line: `{capGuest} đi chắc tay thật, nhưng đêm thứ nhất là đêm của {self}! Hai con ngựa đã vào thế, nước sau mới ra đòn.`,
         emotion: 'fierce',
         gesture: 'closeup_talk',
         stageDirection: 'Hạ thấp giọng, thần thái tập trung khi thế trận khép dần',
+        when: (context) => piecesAwayFromHome(context, 'black', 'horse').length === 2,
       },
       {
         line: `{audience} để ý nhé: đêm nay {self} chỉ đánh bằng một nửa tay - nửa kia để dành cho đêm sau!`,
@@ -128,10 +174,11 @@ export const NIGHT_THEMES: readonly NightTheme[] = [
         stageDirection: 'Che nửa mặt sau tán quạt, nháy mắt với phòng live',
       },
       {
-        line: `Khai đài mà {guest} để {self} dàn đủ hai ngựa thì {pattern} sẽ tới sớm lắm đấy - cẩn thận kẻo {layer} bay đi mất nha!`,
+        line: `Khai đài mà {guest} để {self} giữ nhịp ngựa thì {pattern} sẽ tới sớm lắm đấy - cẩn thận kẻo {layer} bay đi mất nha!`,
         emotion: 'fierce',
         gesture: 'closeup_talk',
         stageDirection: 'Chỉ tay vào ô khuyết giữa bàn, giọng nhắc nhở đầy uy lực',
+        when: (context) => context.board.moveCount === 0 && holdsLayer(context, 'qua_tay_lua'),
       },
     ],
     assets: ['d1-quan-lua.stage', 'd1-quan-lua.bride-calm', 'd1-quan-lua.overlay'],
@@ -153,9 +200,11 @@ export const NIGHT_THEMES: readonly NightTheme[] = [
         emotion: 'fierce',
         gesture: 'closeup_talk',
         stageDirection: 'Ánh mắt sắc lẹm nhìn xuyên qua hai khẩu pháo đối chọi',
+        when: (context) =>
+          pieceAt(context, 'black', 'cannon', 2, 4) && pieceAt(context, 'red', 'cannon', 7, 4),
       },
       {
-        line: `{opening} là thế {self} thích nhất! Hai ông tướng soi mặt nhau giữa bàn cờ - chỉ một nước hớ là {pattern} gọi tên.`,
+        line: `{opening} là thế {self} thích nhất! Đường giữa căng nhất bàn cờ - chỉ một nước hớ là {pattern} gọi tên.`,
         emotion: 'thinking',
         gesture: 'think_fan',
         stageDirection: 'Quạt dừng lại, ngón tay gõ khẽ lên thành kỳ đài',
@@ -165,9 +214,10 @@ export const NIGHT_THEMES: readonly NightTheme[] = [
         emotion: 'amused',
         gesture: 'tease',
         stageDirection: 'Khẽ đưa tay lên cổ rồi cười nhẹ',
+        when: (context) => holdsLayer(context, 'kieng_hoi_mon'),
       },
       {
-        line: `{capSelf} không vội. {audience} thấy nè: {name} đang phải nghĩ lâu hơn {self} rồi đấy~`,
+        line: `{capSelf} không vội. {audience} thấy nè: {name} cứ suy nghĩ cho kỹ, còn {self} rót thêm một chén trà~`,
         emotion: 'calm',
         gesture: 'sip_tea',
         stageDirection: 'Thong thả nhấp trà, cố tình để đồng hồ đếm thêm vài nhịp',
@@ -177,6 +227,8 @@ export const NIGHT_THEMES: readonly NightTheme[] = [
         emotion: 'fierce',
         gesture: 'closeup_talk',
         stageDirection: 'Nghiêng người về trước, giọng hạ thấp đầy cảnh báo',
+        when: (context) =>
+          pieceAt(context, 'black', 'cannon', 2, 4) && pieceAt(context, 'red', 'cannon', 7, 4),
       },
       {
         line: `Đêm nay {self} đánh thẳng, không vòng. Ai giữ nổi hai vị tướng cách nhau một bàn cờ người?`,
@@ -208,36 +260,47 @@ export const NIGHT_THEMES: readonly NightTheme[] = [
         emotion: 'amused',
         gesture: 'tease',
         stageDirection: 'Gạt khẩu pháo vào giữa bàn rồi khẽ cười với đối thủ',
+        when: (context) =>
+          detectRedOpeningShape(context.board.grid) === 'khoi_ma' &&
+          pieceAt(context, 'black', 'cannon', 2, 4),
       },
       {
         line: `Ngựa nằm ở rãnh mới gọi là {pattern}! {self} còn ẩn một nhịp nữa thôi - {guest} đừng chủ quan, kẻo mất ngủ tới sáng.`,
         emotion: 'fierce',
         gesture: 'closeup_talk',
         stageDirection: 'Chỉ tay vào ô rãnh ngựa, ánh mắt rực lên nước đi sắp tới',
+        when: (context) =>
+          pieceAt(context, 'black', 'horse', 2, 2) || pieceAt(context, 'black', 'horse', 2, 6),
       },
       {
         line: `Mũ phượng nặng lắm {guest} ơi - nặng vì cả {audience} đang đội cùng {self}. Rơi lúc nào là mất vui lúc đó~`,
         emotion: 'calm',
         gesture: 'sip_tea',
         stageDirection: 'Sửa lại chiếc mũ phượng, giọng trầm xuống đầy tự tôn',
+        when: (context) => holdsLayer(context, 'mu_phuong'),
       },
       {
         line: `{name} ơi, xe của {guest} đã ra biên rồi đó! Nhưng ngựa của {self} còn ẩn kín hơn nhiều.`,
         emotion: 'thinking',
         gesture: 'think_fan',
         stageDirection: 'Phẩy quạt che nửa gương mặt, đọc đường ngựa đang dọn',
+        when: (context) => piecesAwayFromHome(context, 'red', 'chariot').length > 0,
       },
       {
         line: `Đêm thứ ba là đêm của ngựa. {guest} thấy {self} đi chậm - nhưng {layer} đang rung từng nhịp đấy!`,
         emotion: 'fierce',
         gesture: 'closeup_talk',
         stageDirection: 'Nhịp tay theo thế cờ, hơi thở gấp dần vì hứng khởi',
+        when: (context) => holdsLayer(context, 'mu_phuong'),
       },
       {
         line: `Ai chơi với {self} cũng quên mất con ngựa phía sau pháo. {guest} có muốn là người đầu tiên nhớ ra không?`,
         emotion: 'amused',
         gesture: 'tease',
         stageDirection: 'Che quạt cười, cố tình liếc sang ô ngựa ẩn',
+        when: (context) =>
+          (pieceAt(context, 'black', 'horse', 0, 1) && pieceAt(context, 'black', 'cannon', 2, 1)) ||
+          (pieceAt(context, 'black', 'horse', 0, 7) && pieceAt(context, 'black', 'cannon', 2, 7)),
       },
     ],
     assets: ['d3-mu-phuong.stage', 'd3-mu-phuong.bride-fierce', 'd3-mu-phuong.overlay'],
@@ -259,6 +322,9 @@ export const NIGHT_THEMES: readonly NightTheme[] = [
         emotion: 'amused',
         gesture: 'tease',
         stageDirection: 'Đẩy khẩu pháo vào trung lộ rồi khép quạt đầy thoả mãn',
+        when: (context) =>
+          detectRedOpeningShape(context.board.grid) === 'phi_tuong' &&
+          pieceAt(context, 'black', 'cannon', 2, 4),
       },
       {
         line: `Xe lên một bước là {pattern} mở cửa. {guest} nghe tiếng then cài chưa, hay còn mải nhìn {layer}?`,
@@ -271,24 +337,30 @@ export const NIGHT_THEMES: readonly NightTheme[] = [
         emotion: 'calm',
         gesture: 'sip_tea',
         stageDirection: 'Khẽ cúi nhìn mũi giày thêu, giọng nhẹ mà rất chắc',
+        when: (context) => holdsLayer(context, 'hai_theu'),
       },
       {
         line: `{capGuest} thủ kỹ ghê! Tiếc là cửa giữa đã bị {self} khóa pháo rồi - {audience} đánh xem còn cửa nào không?`,
         emotion: 'thinking',
         gesture: 'think_fan',
         stageDirection: 'Quạt gõ nhịp lên thành kỳ đài khi đọc thế phòng thủ',
+        when: (context) => pieceAt(context, 'black', 'cannon', 2, 4),
       },
       {
         line: `Đêm thứ tư, {self} đánh kiểu cửa quan: pháo giữ then, xe đứng canh. Chậm mà không lọt được đâu {guest}!`,
         emotion: 'fierce',
         gesture: 'closeup_talk',
         stageDirection: 'Ngồi thẳng người, hai tay xếp gọn thành thế trận then cài',
+        when: (context) =>
+          pieceAt(context, 'black', 'cannon', 2, 4) &&
+          piecesAwayFromHome(context, 'black', 'chariot').length > 0,
       },
       {
-        line: `{name} đừng đẩy tốt bừa! Mỗi con tốt lùi một bước là {layer} của {self} nhẹ đi một chút~`,
+        line: `{name} đừng đẩy tốt bừa! Mỗi con tốt tiến một bước là {layer} của {self} nhẹ đi một chút~`,
         emotion: 'amused',
         gesture: 'tease',
-        stageDirection: 'Che quạt cười trêu, liếc nhanh sang cánh tốt vừa tiến',
+        stageDirection: 'Che quạt cười trêu, liếc nhanh sang hàng tốt',
+        when: (context) => holdsLayer(context, 'hai_theu'),
       },
     ],
     assets: ['d4-hai-theu.stage', 'd4-hai-theu.bride-regal', 'd4-hai-theu.overlay'],
@@ -306,25 +378,30 @@ export const NIGHT_THEMES: readonly NightTheme[] = [
     headlineLayer: 'ao_choang',
     teases: [
       {
-        line: `Đêm năm đã lạnh rồi {guest} ơi! {self} khoác áo gấm, hai xe ra trận - {pattern} không đánh một cửa đâu.`,
+        line: `Đêm năm đã lạnh rồi {guest} ơi! {self} khoác áo gấm, hai xe giữ trận - {pattern} không đánh một cửa đâu.`,
         emotion: 'fierce',
         gesture: 'closeup_talk',
-        stageDirection: 'Kéo nhẹ tay áo gấm, hai xe lần lượt rời vị trí',
+        stageDirection: 'Kéo nhẹ tay áo gấm, ánh mắt lần lượt quét hai chiếc xe',
+        when: (context) => pieceCells(context, 'black', 'chariot').length === 2,
       },
       {
-        line: `Xe trái chưa đi, xe phải đã sang. {name} định chặn cửa nào trước, hay để {audience} mách nước?`,
+        line: `Một chiếc xe đã sang, chiếc kia vẫn canh góc. {name} định chặn cửa nào trước, hay để {audience} mách nước?`,
         emotion: 'amused',
         gesture: 'tease',
         stageDirection: 'Chỉ lần lượt hai chiếc xe, nở nụ cười đầy ẩn ý',
+        when: (context) =>
+          pieceAt(context, 'black', 'chariot', 0, 1) && pieceAt(context, 'black', 'chariot', 0, 8),
       },
       {
         line: `Áo gấm ấm lắm, nhưng {layer} này {self} chưa định cởi! Muốn thì {guest} phải sống sót qua hai xe đã~`,
         emotion: 'calm',
         gesture: 'sip_tea',
         stageDirection: 'Khoác lại vạt áo, nhấp trà bình thản giữa thế công',
+        when: (context) =>
+          holdsLayer(context, 'ao_choang') && pieceCells(context, 'black', 'chariot').length === 2,
       },
       {
-        line: `Ngựa của {guest} về chắn rồi! Nhưng hai xe phối nhau thì chắn cũng thành mở - {pattern} tới gần lắm.`,
+        line: `Ngựa của {guest} có về chắn thì các xe phối hợp vẫn mở được đường - {pattern} tới gần lắm.`,
         emotion: 'thinking',
         gesture: 'think_fan',
         stageDirection: 'Gạt quạt sang bên, chăm chú quét hai hàng dọc của đối thủ',
@@ -334,6 +411,7 @@ export const NIGHT_THEMES: readonly NightTheme[] = [
         emotion: 'fierce',
         gesture: 'closeup_talk',
         stageDirection: 'Đặt hai chiếc xe so le, giọng hạ thấp như tuyên án',
+        when: (context) => piecesAwayFromHome(context, 'black', 'chariot').length === 2,
       },
       {
         line: `Đêm thứ năm mà {guest} còn thủ thế thì trăng lặn trước khi cờ tàn mất! Ra đi, {self} đợi đây.`,
@@ -373,12 +451,15 @@ export const NIGHT_THEMES: readonly NightTheme[] = [
         emotion: 'calm',
         gesture: 'sip_tea',
         stageDirection: 'Nâng chén trà chúc, khẽ hướng về phòng live trước khi khai thế',
+        when: (context) =>
+          context.ladder.held.length === 1 && holdsLayer(context, 'nen_hoa_chuc'),
       },
       {
-        line: `{capGuest} mở bằng tốt? Được thôi - đêm nay {self} cũng chẳng cần vòng vo nữa.`,
+        line: `Dù {capGuest} mở bằng tốt hay một nước khác - đêm nay {self} cũng chẳng cần vòng vo nữa.`,
         emotion: 'amused',
         gesture: 'tease',
         stageDirection: 'Khép gọn quạt lại, chỉ để hai tay trên bàn cờ',
+        when: (context) => context.board.moveCount === 0,
       },
       {
         line: `Nến chảy tới chân rồi {guest} ạ. Ai sợ nến tắt trước thì người đó bỏ cuộc - {self} không bỏ.`,

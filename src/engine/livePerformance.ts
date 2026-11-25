@@ -17,7 +17,7 @@ import { BankEntry, commentaryTier, killPatternPool, tierPool } from './commenta
 import type { PatternHolder } from './commentaryBank';
 import type { KillPatternId } from './patterns';
 import { patternNameVi } from './patterns';
-import { NightTheme, nightTeaseTokens } from './nightThemes';
+import { NightTheme, nightTeaseTokens, type NightCopyContext } from './nightThemes';
 
 export type MatchPhase = 'khai_cuoc' | 'trung_cuoc' | 'tan_cuoc' | 'hoi_ket';
 
@@ -831,21 +831,21 @@ export function buildMovePerformanceScript(params: {
  * because that is the only claim this line makes - naming a kill pattern that has not landed
  * would be exactly the false label the broadcast is built to avoid.
  */
-export function buildNightTeaseScript(params: {
+export function buildNightTeaseScript(params: NightCopyContext & {
   night: NightTheme;
   challengerName: string;
   guestGender: GuestGender;
   guestAge: number;
-  moveCount: number;
   recentLines?: string[];
   seed?: number;
 }): PerformanceScript {
   const {
     night,
+    board,
+    ladder,
     challengerName,
     guestGender,
     guestAge,
-    moveCount,
     recentLines = [],
     seed = Date.now(),
   } = params;
@@ -853,14 +853,15 @@ export function buildNightTeaseScript(params: {
   const p = resolvePronounProfile(guestGender, guestAge);
   const shortName = challengerName.replace(/^@/, '') || p.guest;
   const ctx = { ...speechContext(p, shortName), ...nightTeaseTokens(night) };
-  const spoken = night.teases.map((tease) => renderBankEntry(tease, ctx));
+  const eligible = night.teases.filter((tease) => !tease.when || tease.when({ board, ladder }));
+  const spoken = eligible.map((tease) => renderBankEntry(tease, ctx));
   // Recency is judged on the spoken line: recentLines stores what actually went out, so matching
   // the raw template would never hit and the same tease would return on every cue.
   const fresh = spoken.filter((entry) => !recentLines.includes(entry.line));
   const pool = fresh.length > 0 ? fresh : spoken;
   const rendered = pool[Math.abs(Math.trunc(seed)) % pool.length];
   const phase: MatchPhase =
-    moveCount <= 8 ? 'khai_cuoc' : moveCount >= 26 ? 'tan_cuoc' : 'trung_cuoc';
+    board.moveCount <= 8 ? 'khai_cuoc' : board.moveCount >= 26 ? 'tan_cuoc' : 'trung_cuoc';
 
   return {
     line: rendered.line,
