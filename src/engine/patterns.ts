@@ -303,15 +303,20 @@ function detectThietMonThuyen(grid: Grid, f: Frame, king: Coord): boolean {
 }
 
 function detectThienDiaPhao(grid: Grid, f: Frame, king: Coord): boolean {
-  let sky = false;
-  let ground = false;
+  if (king.col !== 4) return false;
+  let sky: Coord | null = null;
   forEachPiece(grid, f.attacker, (p, at) => {
-    if (p.type !== 'cannon') return false;
-    if (at.col === 4 && king.col === 4) sky = true;
-    if (at.row === f.back) ground = true;
-    return false;
+    if (p.type !== 'cannon' || at.col !== 4) return false;
+    sky = at;
+    return true;
   });
-  return sky && ground;
+  if (!sky) return false;
+
+  const defenderBack = f.defender === 'black' ? 0 : 9;
+  return forEachPiece(grid, f.attacker, (p, at) => {
+    if (p.type !== 'cannon' || at.row !== defenderBack) return false;
+    return !isSameSquare(at, sky!);
+  });
 }
 
 function detectHaiDeLaoNguyet(grid: Grid, f: Frame, king: Coord, checkers: Coord[]): boolean {
