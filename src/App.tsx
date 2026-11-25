@@ -2969,7 +2969,7 @@ export default function App() {
           onReplayVoice={() => handleReplayOrTestVoice()}
           onTestVoice={() =>
             handleReplayOrTestVoice(
-              'Đêm hoa chúc... ánh trăng in bóng hồ sen đẹp quá! Chàng thắng ván này thì thiếp nghe lời — còn thua thì ra hành lang ngắm trăng nha!',
+              'Đêm hoa chúc... ánh trăng in bóng hồ sen đẹp quá! Chàng thắng ván này thì thiếp giao lại một lớp hồi môn, còn thua thì ra hành lang ngắm trăng nha!',
             )
           }
           onRequestAiCommentary={() => {
@@ -3212,7 +3212,7 @@ export default function App() {
             }}
             onTestVoice={() =>
               handleReplayOrTestVoice(
-                'Đêm hoa chúc... ánh trăng in bóng hồ sen đẹp quá! Chàng thắng ván này thì thiếp nghe lời — còn thua thì ra hành lang ngắm trăng nha!',
+                'Đêm hoa chúc... ánh trăng in bóng hồ sen đẹp quá! Chàng thắng ván này thì thiếp giao lại một lớp hồi môn, còn thua thì ra hành lang ngắm trăng nha!',
               )
             }
             onResetMatch={handleResetMatch}

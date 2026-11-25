@@ -28,6 +28,7 @@ import { buildMoveCommentaryDelivery } from './matchmaker';
 import { createEmptyGrid, createInitialBoard, generateLegalMoves, makeMove } from './xiangqi';
 
 const SRC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const REPO_ROOT = path.resolve(SRC_DIR, '..');
 
 const TIERS: CommentaryTier[] = COMMENTARY_TIERS;
 
@@ -174,6 +175,7 @@ test('no broadcast copy makes the bride the prize of a bet', () => {
     /(nàng|cô dâu) là của (chàng|anh|bạn)/i,
     /(cá cược|đặt cược|ăn cược|\bcược\b)/i,
     /(trao|tặng|giao) (nàng|cô dâu)/i,
+    /(nghe lời|phục tùng|tuân theo|răm rắp)/i,
   ];
 
   const walk = (dir: string): string[] =>
@@ -183,19 +185,22 @@ test('no broadcast copy makes the bride the prize of a bet', () => {
       return /\.tsx?$/.test(entry.name) && !entry.name.endsWith('.test.ts') ? [full] : [];
     });
 
-  const files = walk(SRC_DIR).map((file) => path.relative(SRC_DIR, file));
+  const files = [...walk(SRC_DIR), path.join(REPO_ROOT, 'server.ts')].map((file) =>
+    path.relative(REPO_ROOT, file),
+  );
   // Counting files would break the moment someone adds a module; what the guard actually needs
   // is proof that the walk reached every place broadcast copy can hide - the UI strings, the
   // tactical bank, and the six-night script are where a line slips in without anyone noticing.
   for (const required of [
-    'App.tsx',
-    path.join('engine', 'commentaryBank.ts'),
-    path.join('engine', 'nightThemes.ts'),
+    path.join('src', 'App.tsx'),
+    path.join('src', 'engine', 'commentaryBank.ts'),
+    path.join('src', 'engine', 'nightThemes.ts'),
+    'server.ts',
   ]) {
     assert.ok(files.includes(required), `the wording scan never read ${required}`);
   }
   for (const file of files) {
-    const text = readFileSync(path.join(SRC_DIR, file), 'utf8');
+    const text = readFileSync(path.join(REPO_ROOT, file), 'utf8');
     for (const pattern of banned) {
       assert.ok(!pattern.test(text), `${file} matches the banned wording ${pattern}`);
     }
