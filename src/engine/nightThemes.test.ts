@@ -14,6 +14,8 @@ import {
   NIGHT_TOKENS,
   NightBookPly,
   NightTheme,
+  buildNightPromptFacts,
+  buildNightPromptState,
   detectRedOpeningShape,
   nightBookFavour,
   nightIndexFromDate,
@@ -466,6 +468,73 @@ test('night copy takes its phase from the real board, not a hardcoded opening', 
     seed: 0,
   });
   assert.equal(script.phase, 'tan_cuoc');
+});
+
+test('night prompt facts carry the real opening, headline stake, and concession', () => {
+  const theme = NIGHT_THEMES[0];
+  const ladder = {
+    held: initialLadder().held.filter((id) => id !== theme.headlineLayer),
+  };
+  const opened = applyHandicap(createInitialBoard(), 'chap_mot_xe', 'ben_phai');
+  assert.ok(opened.ok);
+
+  assert.deepEqual(buildNightPromptFacts(theme, 'phao_dau', ladder, opened.handicap), {
+    openingShape: 'phao_dau',
+    headlineLayerHeld: false,
+    concessionNameVi: 'Chấp Một Xe 9',
+  });
+});
+
+test('night prompt separates the book opening from the real opening and lost stake', () => {
+  const theme = NIGHT_THEMES[0];
+  const layerName = layerById(theme.headlineLayer).nameVi;
+  const lost = buildNightPromptState(
+    theme,
+    {
+      openingShape: 'phao_dau',
+      headlineLayerHeld: false,
+      concessionNameVi: 'Chấp Một Xe 9',
+    },
+    'thiếp',
+    'chàng',
+  );
+
+  assert.ok(lost.includes('Sách khai cuộc của đêm: Tiên Nhân Chỉ Lộ'));
+  assert.ok(lost.includes('Khai cuộc thực tế: Pháo Đầu Trấn Trung'));
+  assert.ok(lost.includes(`Lớp hồi môn trọng tâm "${layerName}" đã giao`));
+  assert.ok(!lost.includes('vẫn đang treo'));
+  assert.ok(lost.includes('Chấp đang chơi: Chấp Một Xe 9'));
+
+  const held = buildNightPromptState(
+    theme,
+    {
+      openingShape: 'khoi_ma',
+      headlineLayerHeld: true,
+      concessionNameVi: 'Đi Thuận Cờ',
+    },
+    'thiếp',
+    'chàng',
+  );
+  assert.ok(held.includes(`Lớp hồi môn trọng tâm "${layerName}" vẫn đang treo`));
+});
+
+test('night prompt refuses unverified facts instead of inventing board state', () => {
+  const state = buildNightPromptState(
+    NIGHT_THEMES[0],
+    {
+      openingShape: 'invented_opening',
+      headlineLayerHeld: 'false',
+      concessionNameVi: '<script>alert(1)</script>',
+    },
+    'thiếp',
+    'chàng',
+  );
+
+  assert.ok(state.includes('Khai cuộc thực tế chưa được xác minh'));
+  assert.ok(state.includes('chưa được xác minh; không được khẳng định nó còn hay đã mất'));
+  assert.ok(state.includes('Chấp đang chơi chưa được xác minh'));
+  assert.ok(!state.includes('invented_opening'));
+  assert.ok(!state.includes('<script>'));
 });
 
 test('the night that concedes gives away the horse her own line does not ride', () => {
