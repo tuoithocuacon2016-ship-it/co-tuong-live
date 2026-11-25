@@ -10,6 +10,7 @@ import {
   buildMovePerformanceScript,
   buildBlackReplyEvaluation,
   buildRepetitionWarningScript,
+  buildVoicePreviewLine,
   classifyTacticalEvent,
   detectMatchPhase,
   resolvePronounProfile,
@@ -34,6 +35,43 @@ test('resolvePronounProfile adapts honorifics cleanly for young male, elder male
   const seniorFemale = resolvePronounProfile('nu', 38);
   assert.equal(seniorFemale.self, 'Điêu Nguyệt');
   assert.equal(seniorFemale.guest, 'tỷ tỷ');
+});
+
+test('voice previews preserve the bridal copy for a young groom', () => {
+  assert.equal(
+    buildVoicePreviewLine({ kind: 'select', guestGender: 'nam', guestAge: 26 }),
+    'Hì hì... chàng nghe giọng này của thiếp — đã đủ ngọt ngào cho đêm hoa chúc chưa nào?',
+  );
+  assert.equal(
+    buildVoicePreviewLine({ kind: 'test', guestGender: 'nam', guestAge: 26 }),
+    'Đêm hoa chúc... ánh trăng in bóng hồ sen đẹp quá! Chàng thắng ván này thì thiếp giao lại một lớp hồi môn, còn thua thì ra hành lang ngắm trăng nha!',
+  );
+  assert.equal(
+    buildVoicePreviewLine({ kind: 'replay', guestGender: 'nam', guestAge: 26 }),
+    'Chàng ơi, đèn hoa chúc sáng rực rồi — mời chàng đi nước cờ đầu tiên cho hai họ phòng live cùng chiêm ngưỡng nha!',
+  );
+});
+
+test('voice previews use the active challenger profile outside the bridal duel', () => {
+  const profiles = [
+    { gender: 'nu' as const, age: 24 },
+    { gender: 'nu' as const, age: 38 },
+    { gender: 'nam' as const, age: 62 },
+  ];
+
+  for (const profile of profiles) {
+    const pronouns = resolvePronounProfile(profile.gender, profile.age);
+    for (const kind of ['select', 'test', 'replay'] as const) {
+      const line = buildVoicePreviewLine({
+        kind,
+        guestGender: profile.gender,
+        guestAge: profile.age,
+      });
+      assert.ok(line.toLowerCase().includes(pronouns.guest.toLowerCase()));
+      if (kind !== 'replay') assert.ok(line.includes(pronouns.self));
+      assert.doesNotMatch(line, /chàng|thiếp|phu thê|hai họ|chú rể|tân lang/i);
+    }
+  }
 });
 
 test('buildMovePerformanceScript choreographs distinct gesture, emotion, and phase for opening vs blunder vs comeback', () => {
