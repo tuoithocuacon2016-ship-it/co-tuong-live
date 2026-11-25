@@ -41,6 +41,7 @@ import {
   LiveChatMessage,
   SIMULATED_TIKTOK_AUDIENCE,
   buildInstantWuxiaCommentary,
+  buildMoveCommentaryDelivery,
   createChallenger,
   emotionToMood,
   pickNextChallenger,
@@ -1071,6 +1072,41 @@ export default function App() {
                 ? 'amused'
                 : 'thinking';
           setHostEmotion(refinedReaction);
+
+          const guest = activeChallengerRef.current;
+          const redDelivery = buildMoveCommentaryDelivery({
+            boardAfter: nextBoard,
+            move,
+            notation,
+            actorName,
+            playedMotif,
+            analysis: botSearch,
+            challengerName: guest.username,
+            guestGender: guest.gender,
+            guestAge: guest.age,
+            scoreDeltaForRed,
+            prevWinProbRed,
+            recentLines: recentLinesRef.current,
+            ladderStep: countLadderStep(dowryRef.current),
+            killPatternId: namedPattern?.id ?? null,
+            previousPhase: phaseRef.current,
+            forcingPattern: Boolean(killStrike?.forcing),
+          });
+          phaseRef.current = detectMatchPhase(nextBoard);
+          recordRecentLine(redDelivery.commentary.line);
+          setCommentary(redDelivery.commentary);
+          setHostEmotion(redDelivery.commentary.emotion ?? refinedReaction);
+          dispatchGestureCue(
+            redDelivery.commentary.gesture ?? 'closeup_talk',
+            redDelivery.commentary.stageDirection,
+            0,
+          );
+          if (redDelivery.voiceReply) {
+            triggerBotSpeaking(redDelivery.commentary.line, redDelivery.commentary.mood, {
+              emotion: redDelivery.commentary.emotion,
+              vocalCue: redDelivery.commentary.vocalCue,
+            });
+          }
 
           const plannedBotMove = botSearch.bestMove;
           let parallelGeminiPromise: Promise<CommentaryItem | null> | undefined;

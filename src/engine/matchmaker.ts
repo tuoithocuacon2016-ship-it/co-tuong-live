@@ -4,8 +4,13 @@ import { BoardState, Move } from './xiangqi';
 import type { KillPatternId } from './patterns';
 import { HostEmotion } from '../scene/portraitKinematics';
 import {
+  MatchPhase,
   PerformanceGesture,
+  TacticalEventType,
   buildMovePerformanceScript,
+  classifyTacticalEvent,
+  detectMatchPhase,
+  shouldVoiceCommentary,
 } from './livePerformance';
 
 export interface ChallengerEntry {
@@ -177,6 +182,43 @@ export function buildInstantWuxiaCommentary(params: {
     stageDirection: script.stageDirection,
     phaseLabel: script.phaseLabel,
     source: 'engine',
+  };
+}
+
+export interface MoveCommentaryDelivery {
+  commentary: CommentaryItem;
+  tacticalEvent: TacticalEventType;
+  phaseChanged: boolean;
+  voiceReply: boolean;
+}
+
+export function buildMoveCommentaryDelivery(
+  params: Parameters<typeof buildInstantWuxiaCommentary>[0] & {
+    previousPhase?: MatchPhase | null;
+    forcingPattern?: boolean;
+  },
+): MoveCommentaryDelivery {
+  const commentary = buildInstantWuxiaCommentary(params);
+  const phase = detectMatchPhase(params.boardAfter);
+  const phaseChanged = params.previousPhase !== phase;
+  const tacticalEvent = classifyTacticalEvent({
+    boardAfter: params.boardAfter,
+    move: params.move,
+    analysis: params.analysis,
+    scoreDeltaForRed: params.scoreDeltaForRed ?? 0,
+    prevWinProbRed: params.prevWinProbRed,
+    phase,
+  });
+  return {
+    commentary,
+    tacticalEvent,
+    phaseChanged,
+    voiceReply: shouldVoiceCommentary({
+      tacticalEvent,
+      killPattern: params.forcingPattern ?? false,
+      phaseChanged,
+      moveCount: params.boardAfter.moveCount,
+    }),
   };
 }
 
