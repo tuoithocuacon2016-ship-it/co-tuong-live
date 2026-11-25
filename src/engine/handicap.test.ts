@@ -166,8 +166,8 @@ test('applying a concession takes exactly one stone and re-signs the opening pos
   // The referee has to start from the array the game is really played from, or every later position
   // key is compared against a phantom 32-stone opening.
   assert.equal(board.refereeHistory?.length, 1);
-  assert.notEqual(board.refereeHistory?.[0].key, opening.refereeHistory?.[0].key);
-  assert.equal(makeMove(board, guest(board, [9, 7], [7, 6])).refereeHistory.length, 2);
+  assert.notEqual(board.refereeHistory![0].key, opening.refereeHistory![0].key);
+  assert.equal(makeMove(board, guest(board, [9, 7], [7, 6])).refereeHistory?.length, 2);
 });
 
 test('a game already under way is never re-hobbled', () => {
