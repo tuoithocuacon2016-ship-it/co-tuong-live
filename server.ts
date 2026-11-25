@@ -7,6 +7,11 @@ import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import { buildGeminiTtsSpeechPayload, normalizeSpeechEmotion } from './src/utils/speechProsody';
 import { resolvePronounProfile } from './src/engine/livePerformance';
 import {
+  nightIndexFromDate,
+  nightTeaseTokens,
+  nightThemeByIndex,
+} from './src/engine/nightThemes';
+import {
   displayHandle,
   reserveActorId,
   resolveIngestToken,
@@ -259,6 +264,7 @@ app.post('/api/commentary', async (req: Request, res: Response) => {
     moveCount,
     recentLines,
     ladderStep,
+    nightIndex,
   } = req.body ?? {};
 
   if (!notation && !botMoveNotation && !playerMoveNotation) {
@@ -309,7 +315,24 @@ app.post('/api/commentary', async (req: Request, res: Response) => {
           ? `Hồi môn đã mất ${ladderGone} lớp, không còn mũ phượng: ${pronouns.self} chẳng còn gì để giữ ngoài ván cờ — giọng thách đấu, không tiếc đồ, không nài nỉ, không nhắc chuyện cưới gả.`
           : `Hồi môn đã mất ${ladderGone} lớp: ${pronouns.self} bắt đầu bực nhưng vẫn giữ phép lịch sự trên kỳ đài.`;
 
+    // Tonight is a chapter, not a mood: the bride steers toward one named pattern and one named
+    // dowry layer. The voice may promise them, never report them - only the board has eaten anyone.
+    const night = nightThemeByIndex(
+      Number.isInteger(nightIndex) && nightIndex >= 1
+        ? nightIndex - 1
+        : nightIndexFromDate(new Date()),
+    );
+    const nightCopy = nightTeaseTokens(night);
+    const nightState =
+      `Đêm ${night.index}/6 — "${night.nameVi}": ${night.taglineVi} ` +
+      `Khai cuộc của đêm: ${nightCopy.opening}. ` +
+      `Thế đêm nay ${pronouns.self} đang nhắm là ${nightCopy.pattern}; ` +
+      `lớp hồi môn đang treo là "${nightCopy.layer}". ` +
+      `CHỈ được hứa, TUYỆT ĐỐI không nói đã khóa được ${pronouns.guest} ` +
+      `hay đã lấy được "${nightCopy.layer}" của ${pronouns.self}.`;
+
     const prompt = [
+      nightState,
       `Giai đoạn ván cờ: ${phaseLabel || 'Hồi II · Trung Cuộc'} (Nước thứ ${moveCount ?? 1}, còn ${pieceCount ?? 28} quân trên bàn).`,
       `Khách mời đang đấu: "${cleanGuest}" (${guestCharacter || 'Kỳ thủ giang hồ'}, ${gender === 'nu' ? 'Nữ' : 'Nam'} ${age} tuổi).`,
       `Xưng hô BẮT BUỘC: tự xưng "${pronouns.self}", gọi đối thủ "${pronouns.guest}", gọi khán giả "${pronouns.audience}".`,

@@ -14,6 +14,7 @@ import { DeepAnalysisResult } from './ai';
 import { BoardState, Move, PIECE_NAME_VI, PieceType } from './xiangqi';
 import { HostEmotion } from '../scene/portraitKinematics';
 import { BankEntry, commentaryTier, tierPool } from './commentaryBank';
+import { NightTheme, nightTeaseTokens } from './nightThemes';
 
 export type MatchPhase = 'khai_cuoc' | 'trung_cuoc' | 'tan_cuoc' | 'hoi_ket';
 
@@ -275,6 +276,18 @@ function renderBankEntry(
     return filled.charAt(0).toUpperCase() + filled.slice(1);
   };
   return { ...entry, line: fill(entry.line), stageDirection: fill(entry.stageDirection) };
+}
+
+/** The pronoun tokens every spoken line is rendered through - the xưng hô rule of the whole show. */
+function speechContext(p: PronounProfile, shortName: string): Record<string, string> {
+  return {
+    guest: p.guest,
+    capGuest: p.guestCap,
+    self: p.self,
+    capSelf: p.self.charAt(0).toUpperCase() + p.self.slice(1),
+    audience: p.audience,
+    name: shortName,
+  };
 }
 
 /**
@@ -753,12 +766,7 @@ export function buildMovePerformanceScript(params: {
     scoreDeltaForRed,
   });
   const ctx = {
-    guest: p.guest,
-    capGuest: p.guestCap,
-    self: p.self,
-    capSelf: p.self.charAt(0).toUpperCase() + p.self.slice(1),
-    audience: p.audience,
-    name: shortName,
+    ...speechContext(p, shortName),
     piece: capVi,
     motif: spokenMotif,
   };
@@ -780,6 +788,53 @@ export function buildMovePerformanceScript(params: {
     phase,
     phaseLabel,
     tacticalEvent,
+  };
+}
+
+/**
+ * Tonight's flavour line from the six-night rotation. The chapter title takes the motif slot
+ * because that is the only claim this line makes - naming a kill pattern that has not landed
+ * would be exactly the false label the broadcast is built to avoid.
+ */
+export function buildNightTeaseScript(params: {
+  night: NightTheme;
+  challengerName: string;
+  guestGender: GuestGender;
+  guestAge: number;
+  moveCount: number;
+  recentLines?: string[];
+  seed?: number;
+}): PerformanceScript {
+  const {
+    night,
+    challengerName,
+    guestGender,
+    guestAge,
+    moveCount,
+    recentLines = [],
+    seed = Date.now(),
+  } = params;
+
+  const p = resolvePronounProfile(guestGender, guestAge);
+  const shortName = challengerName.replace(/^@/, '') || p.guest;
+  const ctx = { ...speechContext(p, shortName), ...nightTeaseTokens(night) };
+  const spoken = night.teases.map((tease) => renderBankEntry(tease, ctx));
+  // Recency is judged on the spoken line: recentLines stores what actually went out, so matching
+  // the raw template would never hit and the same tease would return on every cue.
+  const fresh = spoken.filter((entry) => !recentLines.includes(entry.line));
+  const pool = fresh.length > 0 ? fresh : spoken;
+  const rendered = pool[Math.abs(Math.trunc(seed)) % pool.length];
+  const phase: MatchPhase =
+    moveCount <= 8 ? 'khai_cuoc' : moveCount >= 26 ? 'tan_cuoc' : 'trung_cuoc';
+
+  return {
+    line: rendered.line,
+    motif: night.nameVi,
+    emotion: rendered.emotion,
+    gesture: rendered.gesture,
+    stageDirection: rendered.stageDirection,
+    phase,
+    phaseLabel: MATCH_PHASE_LABELS_VI[phase],
   };
 }
 

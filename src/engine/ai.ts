@@ -42,6 +42,12 @@ export interface AnalyzeOptions {
   mode?: 'play' | 'preview';
   /** Recent Zobrist board hash keys to discourage pointless repetitions when winning */
   recentPositionKeys?: string[];
+  /**
+   * Tonight's signature line: Black squares to prefer. The favour is a static bonus on exact root
+   * scores, so it can only pick a scripted ply that is at most its own 44cp behind the engine's
+   * first choice - a real refutation of the scripted opening still outvotes the show's plan.
+   */
+  bookFavour?: { from: Coord; to: Coord }[];
 }
 
 export interface TacticalVariation {
@@ -940,6 +946,14 @@ export function analyzePosition(
   }
 
   const bookBonuses = getOpeningBookBonuses(state.grid, side, state.moveCount);
+  // Above the strongest classical bonus (38) so tonight's line wins ties, but the bonus is only
+  // added to equal exact scores - a bad scripted ply still loses to the search's own refutation.
+  for (const favour of options?.bookFavour ?? []) {
+    bookBonuses.set(
+      moveKey(favour.from.row, favour.from.col, favour.to.row, favour.to.col),
+      44,
+    );
+  }
   const recentSet = new Set(options?.recentPositionKeys ?? []);
   const refereeLedger = ledgerForBoard(state);
   const refereeActive = refereeLedger.length >= 3;

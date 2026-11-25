@@ -73,6 +73,11 @@ const PATTERN_META: Record<KillPatternId, { nameVi: string; nameZh: string; prio
   khong_dau_phao: { nameVi: 'Không Đầu Pháo', nameZh: '空头炮', priority: 52 },
 };
 
+/** Display name for copy that must name the tactic without duplicating the table. */
+export function patternNameVi(id: KillPatternId): string {
+  return PATTERN_META[id].nameVi;
+}
+
 function frameOf(attacker: Side): Frame {
   const defender = oppositeSide(attacker);
   const back = attacker === 'black' ? 9 : 0;

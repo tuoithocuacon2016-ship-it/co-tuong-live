@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CommentaryTier, TIERED_BANK, commentaryTier, tierPool } from './commentaryBank';
+import { CommentaryTier, COMMENTARY_TOKENS, TIERED_BANK, commentaryTier, tierPool } from './commentaryBank';
 import {
   buildMovePerformanceScript,
   shouldVoiceCommentary,
@@ -72,16 +72,7 @@ test('every banked tactical event carries three fresh lines per tier', () => {
 });
 
 test('the bank talks through tokens the renderer actually substitutes', () => {
-  const known = new Set([
-    'guest',
-    'capGuest',
-    'self',
-    'capSelf',
-    'audience',
-    'name',
-    'piece',
-    'motif',
-  ]);
+  const known = new Set<string>(COMMENTARY_TOKENS);
   for (const event of Object.keys(TIERED_BANK) as TacticalEventType[]) {
     for (const tier of TIERS) {
       for (const entry of tierPool(event, tier)) {
@@ -138,8 +129,13 @@ test('no broadcast copy makes the bride the prize of a bet', () => {
 
   const files = walk(SRC_DIR).map((file) => path.relative(SRC_DIR, file));
   // Counting files would break the moment someone adds a module; what the guard actually needs
-  // is proof that the walk reached the two places broadcast copy can hide.
-  for (const required of ['App.tsx', path.join('engine', 'commentaryBank.ts')]) {
+  // is proof that the walk reached every place broadcast copy can hide - the UI strings, the
+  // tactical bank, and the six-night script are where a line slips in without anyone noticing.
+  for (const required of [
+    'App.tsx',
+    path.join('engine', 'commentaryBank.ts'),
+    path.join('engine', 'nightThemes.ts'),
+  ]) {
     assert.ok(files.includes(required), `the wording scan never read ${required}`);
   }
   for (const file of files) {

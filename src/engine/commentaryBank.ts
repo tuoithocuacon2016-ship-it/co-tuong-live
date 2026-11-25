@@ -18,10 +18,20 @@ export interface BankEntry {
 }
 
 /**
- * Lines are data, not template literals: {guest} {capGuest} {self} {capSelf} {audience} {name}
- * {piece} {motif} are substituted by the caller, so the whole bank can be scanned for banned
- * wording and for hardcoded honorifics in a test.
+ * Lines are data, not template literals: the tokens below are substituted by the caller, so the
+ * whole bank can be scanned for banned wording and for hardcoded honorifics in a test.
+ * Any token outside this list silently deletes a word on air, so it is asserted in tests.
  */
+export const COMMENTARY_TOKENS = [
+  'guest',
+  'capGuest',
+  'self',
+  'capSelf',
+  'audience',
+  'name',
+  'piece',
+  'motif',
+] as const;
 export const TIERED_BANK: Partial<Record<TacticalEventType, Partial<Record<CommentaryTier, BankEntry[]>>>> = {
   check_bot: {
     do_dai: [

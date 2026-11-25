@@ -51,6 +51,7 @@ import {
   PerformanceGesture,
   PerformanceScript,
   buildLiveSessionBeat,
+  buildNightTeaseScript,
   buildRepetitionWarningScript,
   classifyTacticalEvent,
   countBoardPieces,
@@ -69,6 +70,11 @@ import {
   loadLadder,
   saveLadder,
 } from './engine/bridalLadder';
+import {
+  NightTheme,
+  nightBookFavour,
+  resolveNightTheme,
+} from './engine/nightThemes';
 import { refereeForBoard } from './engine/repetitionReferee';
 import {
   CrowdVoteState,
@@ -266,6 +272,9 @@ export default function App() {
   const pieceStyleRef = useRef(pieceStyle);
   const [dowry, setDowry] = useState<BridalLadder>(() => loadLadder(window.localStorage));
   const dowryRef = useRef(dowry);
+  // One evening is one chapter: resolved once per session so the rotation cannot flip at midnight
+  // and strand a game halfway through a different night's book line.
+  const nightRef = useRef<NightTheme>(resolveNightTheme(new Date()));
   const [moveEvent, setMoveEvent] = useState<MoveChoreoPayload | null>(null);
   const [actionCue, setActionCue] = useState<ActionCuePayload | null>(null);
   const focusSeqRef = useRef(0);
@@ -578,6 +587,7 @@ export default function App() {
             guestCharacter: guest.character.title,
             moveCount: params.nextBoard.moveCount,
             ladderStep: countLadderStep(dowryRef.current),
+            nightIndex: nightRef.current.index,
             recentLines: recentLinesRef.current,
             auto: !params.explicitRequest,
           }),
@@ -836,6 +846,7 @@ export default function App() {
             (await xiangqiAiClient.analyzeAsync(nextBoard, difficultyRef.current, {
               mode: 'play',
               recentPositionKeys: recentPosKeysRef.current,
+              bookFavour: nightBookFavour(nightRef.current, nextBoard),
             }));
 
           if (
@@ -2203,16 +2214,27 @@ export default function App() {
         audience_call: 'audience_call',
       } as const;
 
-      const script = buildLiveSessionBeat({
-        beat: beatMap[type],
-        challengerName: guest.username,
-        guestTitle: guest.character.title,
-        guestGender: guest.gender,
-        guestAge: guest.age,
-        winProbRed: analysisRef.current.winProbRed,
-        moveCount: boardRef.current.moveCount,
-        recentLines: recentLinesRef.current,
-      });
+      // The tease cue is the night's own voice; the other gestures keep the general beat pool.
+      const script =
+        type === 'tease'
+          ? buildNightTeaseScript({
+              night: nightRef.current,
+              challengerName: guest.username,
+              guestGender: guest.gender,
+              guestAge: guest.age,
+              moveCount: boardRef.current.moveCount,
+              recentLines: recentLinesRef.current,
+            })
+          : buildLiveSessionBeat({
+              beat: beatMap[type],
+              challengerName: guest.username,
+              guestTitle: guest.character.title,
+              guestGender: guest.gender,
+              guestAge: guest.age,
+              winProbRed: analysisRef.current.winProbRed,
+              moveCount: boardRef.current.moveCount,
+              recentLines: recentLinesRef.current,
+            });
 
       if (type === 'tease' || type === 'audience_call') {
         wuxiaAudio.playPieceSelect();
@@ -2454,6 +2476,7 @@ export default function App() {
           inCheck={board.inCheck}
           botThinking={botThinking}
           viewerCount={viewerCount}
+          nightName={nightRef.current.nameVi}
           analysis={analysis}
           commentary={commentary}
           messages={messages}
