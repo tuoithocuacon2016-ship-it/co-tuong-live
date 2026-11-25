@@ -33,6 +33,7 @@ import {
 } from './xiangqiFast';
 import { colToFile, formatMoveVietnamese } from './notation';
 import { detectKillPattern } from './patterns';
+import type { KillPatternHit, KillPatternId } from './patterns';
 import { ledgerForBoard, losesByPerpetualCheck, recordForPosition } from './repetitionReferee';
 
 export type BotDifficulty = 'nhap_mon' | 'cao_thu' | 'tong_su';
@@ -48,6 +49,11 @@ export interface AnalyzeOptions {
    * first choice - a real refutation of the scripted opening still outvotes the show's plan.
    */
   bookFavour?: { from: Coord; to: Coord }[];
+  /**
+   * Tonight's advertised kill pattern, handed to the motif so the banner names the tactic the show
+   * promised. It changes only which true pattern gets spoken, never which move is chosen.
+   */
+  focusPattern?: KillPatternId | null;
 }
 
 export interface TacticalVariation {
@@ -779,29 +785,41 @@ function extractPvLine(
 // MOTIF, THREATS & WIN PROBABILITY
 // ============================================================================
 
+/**
+ * A pattern earns the banner only on a check, on one of the two strikes that are famous without
+ * one, or on a quiet move whose name carries weight. Names below 60 are shapes, not threats.
+ */
+function isNameablePattern(pattern: KillPatternHit, move: Move): boolean {
+  return (
+    pattern.forcing ||
+    pattern.id === 'dai_dao_hoach_tam' ||
+    pattern.id === 'phao_nan_dan_sa' ||
+    (!move.captured && pattern.priority >= 60)
+  );
+}
+
+/**
+ * `focus` is tonight's advertised kill pattern, named ahead of the priority table when the board
+ * really holds it. A focus that is too quiet to be spoken never costs the room the label it would
+ * already have had: the unfocused hit answers instead.
+ */
 export function detectMoveMotif(
   prevGrid: BoardState['grid'],
   move: Move,
   afterGrid: BoardState['grid'],
+  focus?: KillPatternId | null,
 ): string {
   const opp = oppositeSide(move.piece.side);
   const givesCheck = isInCheck(afterGrid, opp);
   const toFile = colToFile(move.to.col, move.piece.side);
-  const pattern = detectKillPattern(prevGrid, afterGrid, move);
+  const plain = detectKillPattern(prevGrid, afterGrid, move);
+  const advertised =
+    focus && focus !== plain?.id ? detectKillPattern(prevGrid, afterGrid, move, focus) : null;
+  const pattern = advertised && isNameablePattern(advertised, move) ? advertised : plain;
 
-  // Authentic classical Xiangqi kill/tactical patterns take priority on forcing checks
-  // and signature tactical strikes (Đại Đao Hoạch Tâm, Pháo Niễn Đan Sa, Mã Hậu Pháo, etc.)
-  if (pattern) {
-    if (
-      pattern.forcing ||
-      pattern.id === 'dai_dao_hoach_tam' ||
-      pattern.id === 'phao_nan_dan_sa'
-    ) {
-      return pattern.nameVi;
-    }
-    if (!move.captured && pattern.priority >= 60) {
-      return pattern.nameVi;
-    }
+  // A classical pattern beats every geometric name below, once the ply earns the name.
+  if (pattern && isNameablePattern(pattern, move)) {
+    return pattern.nameVi;
   }
 
   if (givesCheck && move.captured) return 'Sát Chiêu Đoạt Mệnh';
@@ -1238,7 +1256,7 @@ export function analyzePosition(
   const afterBest = applyMoveOnGrid(state.grid, best.boardMove);
   const bestNotation = formatMoveVietnamese(state.grid, best.boardMove);
   const pvLine = extractPvLine(fb, state.grid, best.packed, 4);
-  const motif = detectMoveMotif(state.grid, best.boardMove, afterBest);
+  const motif = detectMoveMotif(state.grid, best.boardMove, afterBest, options?.focusPattern);
   const threats = findTacticalThreats(state.grid);
   const winProbRed = scoreToWinProbRed(bestRedScore);
 
