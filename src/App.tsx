@@ -878,6 +878,14 @@ export default function App() {
       // The dowry follows the strongest pattern on the board, not the one tonight advertised: the
       // focus decides what the room is told, never what the bride pays.
       const killStrike = detectKillPattern(currentBoard.grid, nextBoard.grid, move);
+      // ...but the spoken line is keyed to the name the room was actually told, so her copy and the
+      // banner cannot put two different sát pháp on one ply.
+      const spokenPattern = detectKillPattern(
+        currentBoard.grid,
+        nextBoard.grid,
+        move,
+        nightRef.current.focusPattern,
+      );
 
       // The dowry only moves when a checking pattern really lands on the bride, or when she
       // loses the game - it is a consequence on the board, never a scripted handicap.
@@ -968,6 +976,7 @@ export default function App() {
           prevWinProbRed,
           recentLines: recentLinesRef.current,
           ladderStep: countLadderStep(dowryRef.current),
+          killPatternId: spokenPattern?.id ?? null,
         });
         recordRecentLine(fallbackEnd.line);
         setCommentary(fallbackEnd);
@@ -1195,6 +1204,7 @@ export default function App() {
         prevWinProbRed,
         recentLines: recentLinesRef.current,
         ladderStep: countLadderStep(dowryRef.current),
+        killPatternId: spokenPattern?.id ?? null,
       });
 
       const expectedToken = precomputed?.turnToken ?? turnSeqRef.current;
