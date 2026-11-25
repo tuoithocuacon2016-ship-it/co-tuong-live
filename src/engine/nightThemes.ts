@@ -449,7 +449,11 @@ export function nightBookFavour(
 ): { from: Coord; to: Coord }[] {
   if (board.turn !== 'black' || board.status !== 'playing') return [];
 
+  // A conceded night has empty squares where the book expects a stone (让马 takes the horse the
+  // answer is written from). The bonus only ever lands on an exact root move, so an absent piece is
+  // inert today - this is what keeps it inert if the script ever becomes a command.
   if (board.moveCount === 1 && detectRedOpeningShape(board.grid) === theme.shape) {
+    if (!pieceOn(board.grid, theme.answer.from, 'black', theme.answer.type)) return [];
     return [{ from: theme.answer.from, to: theme.answer.to }];
   }
 
@@ -460,7 +464,8 @@ export function nightBookFavour(
     lastMove.piece.side === 'red' &&
     sameSquare(lastMove.from, theme.bridge.from) &&
     sameSquare(lastMove.to, theme.bridge.to) &&
-    pieceOn(board.grid, theme.answer.to, 'black', theme.answer.type)
+    pieceOn(board.grid, theme.answer.to, 'black', theme.answer.type) &&
+    pieceOn(board.grid, theme.follow.from, 'black', theme.follow.type)
   ) {
     return [{ from: theme.follow.from, to: theme.follow.to }];
   }
