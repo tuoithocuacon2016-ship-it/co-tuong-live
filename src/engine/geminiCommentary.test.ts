@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildGeminiCommentaryItem,
+  buildGeminiTacticalRead,
   normalizeGeminiCommentaryResponse,
 } from './geminiCommentary';
 
@@ -62,4 +63,61 @@ test('response normalization keeps only safe display fields and known performanc
   assert.equal(payload.stageDirection, 'Nhìn bàn cờ');
   assert.equal(payload.phaseLabel, undefined);
   assert.equal(normalizeGeminiCommentaryResponse({ line: '   ' }, { motif: '', phaseLabel: '' }), null);
+});
+
+test('Gemini tactical copy never praises or blames the guest for a Black ply', () => {
+  const base = {
+    side: 'black' as const,
+    inCheck: false,
+    isGameOver: false,
+    winProbRed: 50,
+    guestGender: 'nam' as const,
+    guestAge: 26,
+  };
+
+  for (const scoreDeltaForRed of [120, -120]) {
+    const read = buildGeminiTacticalRead({
+      ...base,
+      tacticalEvent: 'comeback_player',
+      scoreDeltaForRed,
+    });
+    assert.doesNotMatch(read, /xuất thần|hở sườn|lật kèo/i);
+  }
+
+  assert.match(
+    buildGeminiTacticalRead({ ...base, scoreDeltaForRed: 120, winProbRed: 70 }),
+    /Chàng đang ép sân/,
+  );
+  assert.match(
+    buildGeminiTacticalRead({ ...base, scoreDeltaForRed: -120, winProbRed: 30 }),
+    /thiếp đang chiếm thượng phong/,
+  );
+});
+
+test('Gemini tactical copy keeps Red praise, blunder, and comeback wording unchanged', () => {
+  const base = {
+    side: 'red' as const,
+    inCheck: false,
+    isGameOver: false,
+    winProbRed: 50,
+    guestGender: 'nam' as const,
+    guestAge: 26,
+  };
+
+  assert.match(
+    buildGeminiTacticalRead({ ...base, scoreDeltaForRed: 120 }),
+    /nước cờ xuất thần/,
+  );
+  assert.match(
+    buildGeminiTacticalRead({ ...base, scoreDeltaForRed: -120 }),
+    /đi hơi vội vàng để hở sườn/,
+  );
+  assert.match(
+    buildGeminiTacticalRead({
+      ...base,
+      scoreDeltaForRed: 140,
+      tacticalEvent: 'comeback_player',
+    }),
+    /LẬT KÈO/,
+  );
 });

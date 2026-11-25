@@ -8,6 +8,8 @@ import {
   buildLiveEntryPlan,
   buildLiveSessionBeat,
   buildMovePerformanceScript,
+  buildBlackReplyEvaluation,
+  classifyTacticalEvent,
   detectMatchPhase,
   resolvePronounProfile,
 } from './livePerformance';
@@ -96,6 +98,94 @@ test('buildMovePerformanceScript choreographs distinct gesture, emotion, and pha
   assert.equal(comebackScript.emotion, 'surprised');
   assert.ok(comebackScript.line.includes('muội'));
   assert.ok(!comebackScript.line.includes('chàng'));
+});
+
+test('buildBlackReplyEvaluation measures the Red-relative change across Black reply', () => {
+  const analysis = analyzePosition(createInitialBoard(), 'nhap_mon');
+  const before = { ...analysis, score: 80, winProbRed: 58 };
+  const after = { ...analysis, score: -25, winProbRed: 62 };
+
+  assert.deepEqual(buildBlackReplyEvaluation(before, after), {
+    scoreDeltaForRed: -105,
+    prevWinProbRed: 58,
+  });
+});
+
+test('tactical praise and blame stay on Red while Black reads the same Red-relative swing correctly', () => {
+  const board0 = createInitialBoard();
+  const redMove = generateLegalMoves(board0.grid, 'red').find(
+    (move) => move.piece.type === 'cannon' && move.from.col === 7 && move.to.col === 4,
+  );
+  assert.ok(redMove);
+  const board1 = makeMove(board0, redMove);
+  const blackMove = generateLegalMoves(board1.grid, 'black').find((move) => {
+    const after = makeMove(board1, move);
+    return !move.captured && after.inCheck === null;
+  });
+  assert.ok(blackMove);
+  const board2 = makeMove(board1, blackMove);
+  const analysis = analyzePosition(board1, 'nhap_mon');
+  const balanced = { ...analysis, winProbRed: 50 };
+  const redAhead = { ...analysis, winProbRed: 70 };
+  const blackAhead = { ...analysis, winProbRed: 30 };
+  const common = { boardAfter: board2, move: blackMove, phase: 'trung_cuoc' as const };
+
+  assert.equal(
+    classifyTacticalEvent({
+      ...common,
+      analysis: balanced,
+      scoreDeltaForRed: 120,
+      prevWinProbRed: 30,
+    }),
+    'balanced_duel',
+  );
+  assert.equal(
+    classifyTacticalEvent({
+      ...common,
+      analysis: blackAhead,
+      scoreDeltaForRed: -120,
+      prevWinProbRed: 50,
+    }),
+    'dominating_bot',
+  );
+  assert.equal(
+    classifyTacticalEvent({
+      ...common,
+      analysis: redAhead,
+      scoreDeltaForRed: 120,
+      prevWinProbRed: 50,
+    }),
+    'under_pressure_bot',
+  );
+
+  const redCommon = { boardAfter: board1, move: redMove, phase: 'trung_cuoc' as const };
+  assert.equal(
+    classifyTacticalEvent({
+      ...redCommon,
+      analysis: balanced,
+      scoreDeltaForRed: 120,
+      prevWinProbRed: 50,
+    }),
+    'brilliant_player',
+  );
+  assert.equal(
+    classifyTacticalEvent({
+      ...redCommon,
+      analysis: balanced,
+      scoreDeltaForRed: -160,
+      prevWinProbRed: 50,
+    }),
+    'blunder_player',
+  );
+  assert.equal(
+    classifyTacticalEvent({
+      ...redCommon,
+      analysis: balanced,
+      scoreDeltaForRed: 140,
+      prevWinProbRed: 30,
+    }),
+    'comeback_player',
+  );
 });
 
 test('buildLiveSessionBeat generates rich non-repeating lines with synced gestures and pause punctuation', () => {

@@ -166,6 +166,16 @@ export function resolvePronounProfile(
   };
 }
 
+export function buildBlackReplyEvaluation(
+  before: DeepAnalysisResult,
+  after: DeepAnalysisResult,
+): { scoreDeltaForRed: number; prevWinProbRed: number } {
+  return {
+    scoreDeltaForRed: after.score - before.score,
+    prevWinProbRed: before.winProbRed,
+  };
+}
+
 /** Classifies the tactical & emotional weight of the just-committed move */
 export function classifyTacticalEvent(params: {
   boardAfter: BoardState;
@@ -200,17 +210,19 @@ export function classifyTacticalEvent(params: {
     return isHeavy ? 'heavy_capture_player' : 'light_capture_player';
   }
 
-  // Dramatic comeback swing: Red was clearly losing (<= 38%) and jumped >= 14% win prob!
-  if (
-    typeof prevWinProbRed === 'number' &&
-    prevWinProbRed <= 38 &&
-    analysis.winProbRed - prevWinProbRed >= 14
-  ) {
-    return 'comeback_player';
+  // Player-only praise or blame would invert the story on a Black ply: a positive Red delta
+  // means the bride just helped her opponent, not that she played brilliantly.
+  if (!isBotMove) {
+    if (
+      typeof prevWinProbRed === 'number' &&
+      prevWinProbRed <= 38 &&
+      analysis.winProbRed - prevWinProbRed >= 14
+    ) {
+      return 'comeback_player';
+    }
+    if (scoreDeltaForRed >= 95) return 'brilliant_player';
+    if (scoreDeltaForRed <= -110) return 'blunder_player';
   }
-
-  if (scoreDeltaForRed >= 95) return 'brilliant_player';
-  if (scoreDeltaForRed <= -110) return 'blunder_player';
   if (phase === 'khai_cuoc') return 'opening_signature';
   if (phase === 'tan_cuoc') return 'tense_endgame';
   if (analysis.winProbRed <= 36) return 'dominating_bot';

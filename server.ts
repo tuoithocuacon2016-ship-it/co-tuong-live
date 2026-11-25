@@ -18,7 +18,10 @@ import {
   sanitizeHandle,
 } from './src/engine/liveIdentity';
 import { ENDPOINT_BUDGETS, callerKey, createBudgetLedger } from './src/server/requestBudget';
-import { normalizeGeminiCommentaryResponse } from './src/engine/geminiCommentary';
+import {
+  buildGeminiTacticalRead,
+  normalizeGeminiCommentaryResponse,
+} from './src/engine/geminiCommentary';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -289,26 +292,18 @@ app.post('/api/commentary', async (req: Request, res: Response) => {
     const pronouns = resolvePronounProfile(gender, age);
     const delta = typeof scoreDeltaForRed === 'number' ? scoreDeltaForRed : 0;
 
-    const tacticalRead =
-      inCheck
-        ? `Đang CHIẾU TƯỚNG nghẹt thở — chỉ một sơ suất là ${pronouns.guest} thua trận ngay!`
-        : isGameOver
-          ? 'Ván cờ vừa PHÂN ĐỊNH THẮNG BẠI!'
-          : tacticalEvent === 'comeback_player'
-            ? `${pronouns.guestCap} vừa tung cú LẬT KÈO ngoạn mục từ thế thua sang thế cân bằng/áp đảo!`
-            : botCaptured
-              ? `${pronouns.self} vừa chớp thời cơ thu phục quân ${botCaptured} của ${pronouns.guest}!`
-              : playerCaptured
-                ? `${pronouns.guestCap} vừa ra tay mạnh mẽ đoạt quân ${playerCaptured} của ${pronouns.self}!`
-                : delta <= -110
-                  ? `${pronouns.guestCap} vừa đi hơi vội vàng để hở sườn — cơ hội vàng cho ${pronouns.self} chọc ghẹo và phản công!`
-                  : delta >= 95
-                    ? `${pronouns.guestCap} vừa đi một nước cờ xuất thần sâu sắc khiến ${pronouns.self} phải trầm trồ nể phục!`
-                    : (winProbRed ?? 50) <= 36
-                      ? `${pronouns.self} đang chiếm thượng phong rõ rệt trên bàn cờ!`
-                      : (winProbRed ?? 50) >= 64
-                        ? `${pronouns.guestCap} đang ép sân rất gắt khiến ${pronouns.self} phải tập trung hóa giải!`
-                        : 'Đôi bên đang so kè cân tài cân sức đầy kịch tính dưới ánh trăng hồ sen.';
+    const tacticalRead = buildGeminiTacticalRead({
+      side: side === 'black' ? 'black' : 'red',
+      inCheck: Boolean(inCheck),
+      isGameOver: Boolean(isGameOver),
+      tacticalEvent: typeof tacticalEvent === 'string' ? tacticalEvent : undefined,
+      botCaptured: typeof botCaptured === 'string' ? botCaptured : undefined,
+      playerCaptured: typeof playerCaptured === 'string' ? playerCaptured : undefined,
+      scoreDeltaForRed: delta,
+      winProbRed: typeof winProbRed === 'number' ? winProbRed : 50,
+      guestGender: gender,
+      guestAge: age,
+    });
 
     const recentContext =
       Array.isArray(recentLines) && recentLines.length > 0

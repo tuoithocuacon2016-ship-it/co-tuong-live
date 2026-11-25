@@ -51,6 +51,7 @@ import {
   MATCH_PHASE_LABELS_VI,
   PerformanceGesture,
   PerformanceScript,
+  buildBlackReplyEvaluation,
   buildLiveEntryPlan,
   buildLiveSessionBeat,
   buildNightTeaseScript,
@@ -1222,6 +1223,7 @@ export default function App() {
           let parallelGeminiPromise: Promise<CommentaryItem | null> | undefined;
           let voicePlannedReply: boolean | undefined;
           let boardAfterBotAnalysis: DeepAnalysisResult | undefined;
+          let blackReplyEvaluation = buildBlackReplyEvaluation(botSearch, botSearch);
 
           if (plannedBotMove) {
             const botNotation = formatMoveVietnamese(nextBoard.grid, plannedBotMove);
@@ -1250,13 +1252,14 @@ export default function App() {
               return;
             }
 
+            blackReplyEvaluation = buildBlackReplyEvaluation(botSearch, boardAfterBotAnalysis);
             const plannedReplyPhase = detectMatchPhase(simulatedAfterBot);
             const plannedReplyEvent = classifyTacticalEvent({
               boardAfter: simulatedAfterBot,
               move: plannedBotMove,
               analysis: boardAfterBotAnalysis,
-              scoreDeltaForRed,
-              prevWinProbRed,
+              scoreDeltaForRed: blackReplyEvaluation.scoreDeltaForRed,
+              prevWinProbRed: blackReplyEvaluation.prevWinProbRed,
               phase: plannedReplyPhase,
             });
             // The paid Gemini round-trip is only worth firing on a ply she would actually speak
@@ -1281,8 +1284,8 @@ export default function App() {
                 move: plannedBotMove,
                 verifiedMotif: plannedMotif,
                 nextAnalysis: boardAfterBotAnalysis,
-                scoreDeltaForRed,
-                prevWinProbRed,
+                scoreDeltaForRed: blackReplyEvaluation.scoreDeltaForRed,
+                prevWinProbRed: blackReplyEvaluation.prevWinProbRed,
                 playerCaptured: move.captured
                   ? PIECE_NAME_VI[move.captured.side][move.captured.type]
                   : undefined,
@@ -1312,7 +1315,7 @@ export default function App() {
               commitMove(plannedBotMove, BOT_MASTER_PROFILE.name, 'black', {
                 nextAnalysis: boardAfterBotAnalysis,
                 geminiPromise: parallelGeminiPromise,
-                scoreDeltaForRed,
+                scoreDeltaForRed: blackReplyEvaluation.scoreDeltaForRed,
                 turnToken: myTurnToken,
                 voiceReply: voicePlannedReply,
               });
