@@ -74,6 +74,9 @@ import {
 } from './engine/bridalLadder';
 import {
   NightTheme,
+  RedOpeningShape,
+  buildNightPromptFacts,
+  detectRedOpeningShape,
   nightBookFavour,
   nightDowryStatus,
   resolveNightTheme,
@@ -317,6 +320,7 @@ export default function App() {
   // One evening is one chapter: resolved once per session so the rotation cannot flip at midnight
   // and strand a game halfway through a different night's book line.
   const nightRef = useRef<NightTheme>(resolveNightTheme(new Date()));
+  const openingShapeRef = useRef<RedOpeningShape>('bat_ky');
   const [moveEvent, setMoveEvent] = useState<MoveChoreoPayload | null>(null);
   const [actionCue, setActionCue] = useState<ActionCuePayload | null>(null);
   const focusSeqRef = useRef(0);
@@ -701,6 +705,7 @@ export default function App() {
       setPreferredPieceId(null);
       setMoveHistory([]);
       lastVerifiedMotifRef.current = '';
+      openingShapeRef.current = 'bat_ky';
       stageRef.current?.syncBoard(setup.board, null, false);
       stageRef.current?.setSelectionOverlay(null, []);
       stageRef.current?.updateAnalysisVisuals(setup.board, freshAnalysis, showAnalysis, null);
@@ -774,6 +779,12 @@ export default function App() {
             moveCount: params.nextBoard.moveCount,
             ladderStep: countLadderStep(dowryRef.current),
             nightIndex: nightRef.current.index,
+            nightContext: buildNightPromptFacts(
+              nightRef.current,
+              openingShapeRef.current,
+              dowryRef.current,
+              concessionRef.current.handicap,
+            ),
             recentLines: recentLinesRef.current,
             auto: !params.explicitRequest,
           }),
@@ -856,6 +867,9 @@ export default function App() {
       }
       const notation = formatMoveVietnamese(currentBoard.grid, move);
       const nextBoard = makeMove(currentBoard, move);
+      if (side === 'red' && currentBoard.moveCount === 0) {
+        openingShapeRef.current = detectRedOpeningShape(nextBoard.grid);
+      }
       if (side === 'black') {
         // The bride's own plies are what the shield ledger watches: 出林车 only ever exists for one
         // ply, so every Black move has to pass through it, whatever door the search chose it from.
@@ -2583,6 +2597,7 @@ export default function App() {
     setAnalysis(freshAnalysis);
     setMoveHistory([]);
     lastVerifiedMotifRef.current = '';
+    openingShapeRef.current = 'bat_ky';
     setSelectedSquare(null);
     setPreferredPieceId(null);
     setBoardFocus(null);

@@ -7,8 +7,8 @@ import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import { buildGeminiTtsSpeechPayload, normalizeSpeechEmotion } from './src/utils/speechProsody';
 import { resolvePronounProfile } from './src/engine/livePerformance';
 import {
+  buildNightPromptState,
   nightIndexFromDate,
-  nightTeaseTokens,
   nightThemeByIndex,
 } from './src/engine/nightThemes';
 import {
@@ -332,14 +332,12 @@ app.post('/api/commentary', async (req: Request, res: Response) => {
         ? nightIndex - 1
         : nightIndexFromDate(new Date()),
     );
-    const nightCopy = nightTeaseTokens(night);
-    const nightState =
-      `Đêm ${night.index}/6 — "${night.nameVi}": ${night.taglineVi} ` +
-      `Khai cuộc của đêm: ${nightCopy.opening}. ` +
-      `Thế đêm nay ${pronouns.self} đang nhắm là ${nightCopy.pattern}; ` +
-      `lớp hồi môn đang treo là "${nightCopy.layer}". ` +
-      `CHỈ được hứa, TUYỆT ĐỐI không nói đã khóa được ${pronouns.guest} ` +
-      `hay đã lấy được "${nightCopy.layer}" của ${pronouns.self}.`;
+    const nightState = buildNightPromptState(
+      night,
+      req.body?.nightContext,
+      pronouns.self,
+      pronouns.guest,
+    );
 
     const prompt = [
       nightState,

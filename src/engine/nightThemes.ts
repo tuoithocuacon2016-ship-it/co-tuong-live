@@ -7,7 +7,12 @@
  * files right-to-left (file = 9 - col) and Black left-to-right (file = col + 1).
  */
 
-import type { ConcessionChoice } from './handicap';
+import {
+  HANDICAP_LADDER,
+  handicapFor,
+  type ConcessionChoice,
+  type Handicap,
+} from './handicap';
 import type { KillPatternId } from './patterns';
 import { patternNameVi } from './patterns';
 import type { BridalLadder, DowryLayerId } from './bridalLadder';
@@ -35,6 +40,12 @@ export interface NightBookPly {
 export interface NightCopyContext {
   board: BoardState;
   ladder: BridalLadder;
+}
+
+export interface NightPromptFacts {
+  openingShape: RedOpeningShape;
+  headlineLayerHeld: boolean;
+  concessionNameVi: string;
 }
 
 export interface NightTease {
@@ -603,4 +614,72 @@ export function nightTeaseTokens(theme: NightTheme): Record<string, string> {
     pattern: patternNameVi(theme.focusPattern),
     layer: layerById(theme.headlineLayer).nameVi,
   };
+}
+
+export function redOpeningShapeNameVi(shape: RedOpeningShape): string {
+  return SHAPE_NAME_VI[shape];
+}
+
+export function buildNightPromptFacts(
+  theme: NightTheme,
+  openingShape: RedOpeningShape,
+  ladder: BridalLadder,
+  handicap: Handicap,
+): NightPromptFacts {
+  return {
+    openingShape,
+    headlineLayerHeld: isHeld(ladder, theme.headlineLayer),
+    concessionNameVi: handicap.nameVi,
+  };
+}
+
+const OPENING_SHAPE_VALUES = new Set<RedOpeningShape>(
+  Object.keys(SHAPE_NAME_VI) as RedOpeningShape[],
+);
+const CONCESSION_NAME_VALUES = new Set(
+  HANDICAP_LADDER.flatMap((rung) =>
+    (['ben_trai', 'ben_phai', 'ca_hai'] as const).map(
+      (flank) => handicapFor(rung.id, flank).nameVi,
+    ),
+  ),
+);
+
+export function buildNightPromptState(
+  theme: NightTheme,
+  rawFacts: unknown,
+  self: string,
+  guest: string,
+): string {
+  const facts =
+    rawFacts && typeof rawFacts === 'object' ? (rawFacts as Record<string, unknown>) : {};
+  const openingShape = OPENING_SHAPE_VALUES.has(facts.openingShape as RedOpeningShape)
+    ? (facts.openingShape as RedOpeningShape)
+    : null;
+  const headlineLayerHeld =
+    typeof facts.headlineLayerHeld === 'boolean' ? facts.headlineLayerHeld : null;
+  const concessionNameVi =
+    typeof facts.concessionNameVi === 'string' && CONCESSION_NAME_VALUES.has(facts.concessionNameVi)
+      ? facts.concessionNameVi
+      : null;
+  const copy = nightTeaseTokens(theme);
+  const openingState = openingShape
+    ? `Khai cuộc thực tế: ${redOpeningShapeNameVi(openingShape)}.`
+    : 'Khai cuộc thực tế chưa được xác minh; không được nói tên opening.';
+  const layerState =
+    headlineLayerHeld === true
+      ? `Lớp hồi môn trọng tâm "${copy.layer}" vẫn đang treo.`
+      : headlineLayerHeld === false
+        ? `Lớp hồi môn trọng tâm "${copy.layer}" đã giao; không được nhắc nó như một phần thưởng còn trên bàn.`
+        : `Trạng thái lớp hồi môn trọng tâm "${copy.layer}" chưa được xác minh; không được khẳng định nó còn hay đã mất.`;
+  const concessionState = concessionNameVi
+    ? `Chấp đang chơi: ${concessionNameVi}. Chỉ được nhắc quân thực sự đã rút theo chấp này.`
+    : 'Chấp đang chơi chưa được xác minh; không được bịa quân đã rút.';
+
+  return (
+    `Đêm ${theme.index}/6 — "${theme.nameVi}": ${theme.taglineVi} ` +
+    `Sách khai cuộc của đêm: ${copy.opening}. ${openingState} ` +
+    `Thế đêm nay ${self} đang nhắm là ${copy.pattern}; ${layerState} ${concessionState} ` +
+    `CHỈ được hứa, TUYỆT ĐỐI không nói đã khóa được ${guest} ` +
+    `hay đã lấy được "${copy.layer}" của ${self}.`
+  );
 }
