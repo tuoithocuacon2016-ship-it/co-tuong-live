@@ -277,7 +277,7 @@ export const CinematicPavilionPane: React.FC<CinematicPavilionPaneProps> = ({
     }
 
     const tick = (now: number) => {
-      const dt = Math.min(0.06, Math.max(0.001, (now - lastTs) / 1000));
+      const dt = Math.max(0.001, (now - lastTs) / 1000);
       lastTs = now;
       const props = latestPropsRef.current;
 

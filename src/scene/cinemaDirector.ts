@@ -183,6 +183,41 @@ function smoothstep(edge0: number, edge1: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
+export const MOVE_PIECE_DURATION_S = 1.55;
+export const MOVE_REACH_PROGRESS = 0.28;
+export const MOVE_LANDING_PROGRESS = 0.72;
+export const MOVE_WITHDRAW_PROGRESS = 0.74;
+export const MOVE_LANDING_MS = Math.round(MOVE_PIECE_DURATION_S * MOVE_LANDING_PROGRESS * 1000);
+export const MOVE_SETTLE_MS = Math.round(MOVE_PIECE_DURATION_S * 1000);
+
+export type BoardMovePhase = 'reach' | 'carry' | 'landed' | 'withdraw';
+
+export interface BoardMoveSample {
+  phase: BoardMovePhase;
+  travel: number;
+  lift: number;
+  landed: boolean;
+}
+
+export function sampleBoardMoveTimeline(elapsedSeconds: number): BoardMoveSample {
+  const progress = clamp01(elapsedSeconds / MOVE_PIECE_DURATION_S);
+  const boundaryEpsilon = 1e-9;
+  if (progress + boundaryEpsilon < MOVE_REACH_PROGRESS) {
+    return { phase: 'reach', travel: 0, lift: 0, landed: false };
+  }
+  if (progress + boundaryEpsilon < MOVE_LANDING_PROGRESS) {
+    const travel = smoothstep(MOVE_REACH_PROGRESS, MOVE_LANDING_PROGRESS, progress);
+    return { phase: 'carry', travel, lift: Math.sin(travel * Math.PI), landed: false };
+  }
+  return {
+    phase:
+      progress + boundaryEpsilon < MOVE_WITHDRAW_PROGRESS ? 'landed' : 'withdraw',
+    travel: 1,
+    lift: 0,
+    landed: true,
+  };
+}
+
 export function createInitialCinemaDirector(): CinemaDirectorState {
   return {
     elapsed: 0,
@@ -293,16 +328,16 @@ function evaluateCharacterPose(
     const [fx, fy, fz] = boardCoordToCinemaWorld(state.fromCoord);
     const [tx, ty, tz] = boardCoordToCinemaWorld(state.toCoord);
 
-    if (p < 0.28) {
-      const k = smoothstep(0, 0.28, p);
+    if (p < MOVE_REACH_PROGRESS) {
+      const k = smoothstep(0, MOVE_REACH_PROGRESS, p);
       rightReachWeight = k;
       rightReachTargetX = fx;
       rightReachTargetY = fy + 0.06 + (1 - k) * 0.18;
       rightReachTargetZ = fz;
       torsoLeanForward += k * 0.22;
       headPitch = 0.34 * k + headPitch * (1 - k);
-    } else if (p < 0.74) {
-      const moveT = smoothstep(0.28, 0.72, p);
+    } else if (p < MOVE_WITHDRAW_PROGRESS) {
+      const moveT = smoothstep(MOVE_REACH_PROGRESS, MOVE_LANDING_PROGRESS, p);
       rightReachWeight = 1;
       pieceLiftedProgress = moveT;
       rightReachTargetX = fx + (tx - fx) * moveT;
@@ -313,7 +348,8 @@ function evaluateCharacterPose(
       headPitch = 0.36;
       headYaw = -rightReachTargetX * sideSign * 0.28;
     } else {
-      const ret = smoothstep(0.74, 1.0, p);
+      pieceLiftedProgress = 1;
+      const ret = smoothstep(MOVE_WITHDRAW_PROGRESS, 1.0, p);
       rightReachWeight = 1 - ret;
       rightReachTargetX = tx;
       rightReachTargetY = ty + 0.05 + ret * 0.18;
@@ -461,7 +497,7 @@ export function stepCinemaDirector(
   state: CinemaDirectorState,
   input: CinemaStepInput,
 ): CinemaStepResult {
-  const dt = Math.min(0.1, Math.max(0.001, input.dt));
+  const dt = Math.max(0.001, input.dt);
   state.elapsed += dt;
   state.shotTimer += dt;
   state.lastCutWasSharp = false;
@@ -495,7 +531,7 @@ export function stepCinemaDirector(
       : null;
     state.movePresentationShot = presentation?.shot ?? null;
     const actor = isBrideMove ? state.brideAction : state.groomAction;
-    startAction(actor, 'move_piece', 1.55, {
+    startAction(actor, 'move_piece', MOVE_PIECE_DURATION_S, {
       fromCoord: input.moveEvent.from,
       toCoord: input.moveEvent.to,
       pieceId: input.moveEvent.pieceId,
