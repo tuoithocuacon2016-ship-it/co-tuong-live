@@ -1,6 +1,6 @@
 # TASK-001: Trọng Tài Luật Cờ Tướng Chuẩn Giải (Trường Chiếu, Lặp Thế 3 Lần & Luật 60 Hiệp)
 
-- **Trạng thái:** `Sẵn sàng nhận việc (Ready)`
+- **Trạng thái:** `Hoàn tất (Completed) — 2026-11-25`
 - **Độ ưu tiên:** `Cao (P1)`
 - **Người thực hiện:** Dev nghiên cứu lõi
 - **Nhánh đề xuất:** `feat/xiangqi-repetition-referee`
@@ -55,10 +55,17 @@ Viết unit test dùng `node:test` + `node:assert/strict` bao phủ tối thiể
 ---
 
 ## 4. Tiêu chí nghiệm thu (Definition of Done)
-- [ ] Tất cả lệnh sau chạy **0 lỗi, 100% PASS** trên nhánh nộp:
+- [x] Tất cả lệnh sau chạy **0 lỗi, 100% PASS** trên nhánh nộp:
   - `npm run lint` (`tsc --noEmit`)
-  - `npm test` (giữ nguyên toàn bộ **76 test cũ** xanh + toàn bộ test mới xanh)
+  - `npm test` (toàn bộ test cũ giữ xanh; suite hiện tại **171/171 PASS**)
   - `npm run build`
-- [ ] **Nối thông 100% từ Backend/Engine ra tới UI** — không để module mới nằm rời chưa được gọi trong `App.tsx` hoặc `ai.ts`.
-- [ ] Không thay đổi cấu trúc bảo mật `actorId` / `CTL_LIVE_INGEST_TOKEN`, không chỉnh sửa 3D board (`src/scene/*`) hay bố cục HUD ngoài phạm vi thẻ việc.
-- [ ] Kèm mô tả ngắn trong PR/commit về các file đã sửa và kết quả chạy thử thực tế.
+- [x] **Nối thông 100% từ Backend/Engine ra tới UI** — `App.tsx`, `StatusModal.tsx`, `livePerformance.ts` và `ai.ts` đều gọi module trọng tài.
+- [x] Không thay đổi cấu trúc bảo mật `actorId` / `CTL_LIVE_INGEST_TOKEN`, không chỉnh sửa 3D board (`src/scene/*`) hay bố cục HUD ngoài phạm vi thẻ việc.
+- [x] Kèm mô tả ngắn trong PR/commit về các file đã sửa và kết quả chạy thử thực tế.
+
+## 5. Bằng chứng nghiệm thu
+
+- PR gốc: [#1 — feat(trọng tài): lặp thế & Trường Chiếu](https://github.com/tuoithocuacon2016-ship-it/co-tuong-live/pull/1), merge `2864012e5ef625a53761dd67fd886f95b7f5c761` lúc **2026-11-25 00:44 UTC**.
+- Phạm vi file đã đối chiếu trực tiếp với merge commit: `src/engine/repetitionReferee.ts`, `repetitionReferee.test.ts`, `xiangqi.ts`, `ai.ts`, `livePerformance.ts`, `src/App.tsx`, `src/components/StatusModal.tsx`.
+- Xác minh lại ngày **2026-11-25** trên nhánh kế thừa: `npm run lint` PASS, `npm test` **171/171 PASS**, `npm run build` PASS.
+- Production build đã được thêm thành bước CI bắt buộc trong PR #24, nên tiêu chí build không còn chỉ được kiểm tra cục bộ.
