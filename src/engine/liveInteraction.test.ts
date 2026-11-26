@@ -13,6 +13,7 @@ import {
 } from './liveInteraction';
 import { createChallenger } from './matchmaker';
 import { actorIdFor } from './liveIdentity';
+import { resolvePronounProfile } from './livePerformance';
 import {
   classifyChatMessage,
   normalizeSpokenMoveNumbers,
@@ -278,4 +279,56 @@ test('Crowd vote tracker enforces 1 vote per user (latest wins) and tallies Top 
   });
   assert.ok(script.line.includes('MinhAnh'));
   assert.equal(script.gesture, 'tease');
+});
+
+test('backseat coaching follows each challenger profile and preserves the bridal line', () => {
+  const cases = [
+    {
+      guestGender: 'nam' as const,
+      guestAge: 26,
+      bridal: true,
+      expected:
+        'Ơ kìa MinhAnh... định phím nước cờ cho chàng hả? Thiếp nghe thấy hết rồi nha — hai họ chứng giám giúp thiếp đi!',
+    },
+    {
+      guestGender: 'nu' as const,
+      guestAge: 24,
+      bridal: false,
+      expected:
+        'Ơ kìa MinhAnh... định phím nước cờ cho muội hả? Tỷ nghe thấy hết rồi nha — cả phòng live chứng giám giúp tỷ đi!',
+    },
+    {
+      guestGender: 'nu' as const,
+      guestAge: 38,
+      bridal: false,
+      expected:
+        'Ơ kìa MinhAnh... định phím nước cờ cho tỷ tỷ hả? Điêu Nguyệt nghe thấy hết rồi nha — quan khách chứng giám giúp Điêu Nguyệt đi!',
+    },
+    {
+      guestGender: 'nam' as const,
+      guestAge: 62,
+      bridal: false,
+      expected:
+        'Ơ kìa MinhAnh... định phím nước cờ cho tiền bối hả? Tiểu nữ nghe thấy hết rồi nha — quan khách chứng giám giúp tiểu nữ đi!',
+    },
+  ];
+
+  for (const profile of cases) {
+    const pronouns = resolvePronounProfile(profile.guestGender, profile.guestAge);
+    const script = buildLiveInteractionScript({
+      kind: 'backseat_coach',
+      challengerName: '@KiemKhach',
+      guestGender: profile.guestGender,
+      guestAge: profile.guestAge,
+      viewerName: '@MinhAnh',
+      recentLines: [
+        `Ái chà MinhAnh ơi! ${pronouns.audience} đừng mách bài cho ${pronouns.guest} chứ — để ${pronouns.guest} tự đấu xem bản lĩnh tới đâu nào!`,
+        `Hì hì... bắt quả tang MinhAnh đang nhắc tuồng kìa! ${pronouns.guestCap} mà nghe theo nước ấy thì cẩn thận sập bẫy của ${pronouns.self} nha!`,
+      ],
+    });
+    assert.equal(script.line, profile.expected);
+    if (!profile.bridal) {
+      assert.doesNotMatch(script.line, /chàng|thiếp|phu thê|hai họ|chú rể|tân lang/i);
+    }
+  }
 });

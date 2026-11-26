@@ -19,21 +19,25 @@ import {
 test('resolvePronounProfile adapts honorifics cleanly for young male, elder male, and female guests', () => {
   const youngMale = resolvePronounProfile('nam', 26);
   assert.equal(youngMale.self, 'thiếp');
+  assert.equal(youngMale.selfCap, 'Thiếp');
   assert.equal(youngMale.guest, 'chàng');
   assert.equal(youngMale.storyMode, 'bridal_duel');
 
   const elderMale = resolvePronounProfile('nam', 62);
   assert.equal(elderMale.self, 'tiểu nữ');
+  assert.equal(elderMale.selfCap, 'Tiểu nữ');
   assert.equal(elderMale.guest, 'tiền bối');
   assert.equal(elderMale.storyMode, 'elder_respect');
 
   const youngFemale = resolvePronounProfile('nu', 24);
   assert.equal(youngFemale.self, 'tỷ');
+  assert.equal(youngFemale.selfCap, 'Tỷ');
   assert.equal(youngFemale.guest, 'muội');
   assert.equal(youngFemale.storyMode, 'sister_duel');
 
   const seniorFemale = resolvePronounProfile('nu', 38);
   assert.equal(seniorFemale.self, 'Điêu Nguyệt');
+  assert.equal(seniorFemale.selfCap, 'Điêu Nguyệt');
   assert.equal(seniorFemale.guest, 'tỷ tỷ');
 });
 
